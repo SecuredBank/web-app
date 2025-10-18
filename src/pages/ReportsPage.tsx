@@ -1,0 +1,346 @@
+import { useState, useEffect } from 'react'
+import { 
+  FileText, 
+  Download, 
+  Calendar, 
+  Filter, 
+  BarChart3,
+  PieChart,
+  TrendingUp,
+  Clock,
+  User,
+  Shield,
+  Eye
+} from 'lucide-react'
+import { Report, ReportType, ReportData } from '@types'
+import { cn } from '@utils/cn'
+
+// Mock report data
+const mockReports: Report[] = [
+  {
+    id: '1',
+    title: 'Monthly Security Summary',
+    type: 'security_summary',
+    generatedAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
+    generatedBy: 'Security Admin',
+    format: 'pdf',
+    data: {
+      period: {
+        start: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30),
+        end: new Date(),
+      },
+      metrics: [
+        { id: '1', name: 'Total Alerts', value: 156, unit: 'alerts', trend: 'up', change: 12, timestamp: new Date() },
+        { id: '2', name: 'Resolved Alerts', value: 142, unit: 'alerts', trend: 'up', change: 8, timestamp: new Date() },
+        { id: '3', name: 'False Positives', value: 8, unit: 'alerts', trend: 'down', change: -15, timestamp: new Date() },
+      ],
+      alerts: [],
+      summary: 'Security metrics show a 12% increase in total alerts this month, with 91% resolution rate. System performance remains stable.',
+    },
+  },
+  {
+    id: '2',
+    title: 'User Activity Report',
+    type: 'user_activity',
+    generatedAt: new Date(Date.now() - 1000 * 60 * 60 * 6),
+    generatedBy: 'System Admin',
+    format: 'csv',
+    data: {
+      period: {
+        start: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7),
+        end: new Date(),
+      },
+      metrics: [
+        { id: '1', name: 'Active Users', value: 156, unit: 'users', trend: 'stable', change: 2, timestamp: new Date() },
+        { id: '2', name: 'Login Attempts', value: 1240, unit: 'attempts', trend: 'up', change: 5, timestamp: new Date() },
+        { id: '3', name: 'Failed Logins', value: 23, unit: 'attempts', trend: 'down', change: -8, timestamp: new Date() },
+      ],
+      alerts: [],
+      summary: 'User activity shows consistent engagement with 156 active users and 98% successful login rate.',
+    },
+  },
+  {
+    id: '3',
+    title: 'Transaction Analysis',
+    type: 'transaction_analysis',
+    generatedAt: new Date(Date.now() - 1000 * 60 * 60 * 12),
+    generatedBy: 'Financial Analyst',
+    format: 'json',
+    data: {
+      period: {
+        start: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14),
+        end: new Date(),
+      },
+      metrics: [
+        { id: '1', name: 'Total Transactions', value: 15420, unit: 'transactions', trend: 'up', change: 18, timestamp: new Date() },
+        { id: '2', name: 'Suspicious Transactions', value: 12, unit: 'transactions', trend: 'down', change: -25, timestamp: new Date() },
+        { id: '3', name: 'Blocked Transactions', value: 3, unit: 'transactions', trend: 'stable', change: 0, timestamp: new Date() },
+      ],
+      alerts: [],
+      summary: 'Transaction volume increased by 18% with improved fraud detection reducing suspicious transactions by 25%.',
+    },
+  },
+]
+
+const reportTypeColors = {
+  security_summary: 'bg-danger-100 text-danger-800',
+  user_activity: 'bg-primary-100 text-primary-800',
+  transaction_analysis: 'bg-warning-100 text-warning-800',
+  threat_intelligence: 'bg-success-100 text-success-800',
+  compliance_report: 'bg-secondary-100 text-secondary-800',
+}
+
+const formatColors = {
+  pdf: 'bg-danger-100 text-danger-800',
+  csv: 'bg-success-100 text-success-800',
+  json: 'bg-warning-100 text-warning-800',
+}
+
+function ReportCard({ report, onView, onDownload }: {
+  report: Report
+  onView: (report: Report) => void
+  onDownload: (report: Report) => void
+}) {
+  return (
+    <div className="card p-6 hover:shadow-elevated transition-shadow">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex-1">
+          <div className="flex items-center space-x-2 mb-2">
+            <h3 className="text-lg font-semibold text-secondary-900">{report.title}</h3>
+            <span className={cn(
+              'px-2 py-1 text-xs font-medium rounded-full',
+              reportTypeColors[report.type]
+            )}>
+              {report.type.replace('_', ' ')}
+            </span>
+            <span className={cn(
+              'px-2 py-1 text-xs font-medium rounded-full',
+              formatColors[report.format]
+            )}>
+              {report.format.toUpperCase()}
+            </span>
+          </div>
+          
+          <div className="space-y-1 text-sm text-secondary-600">
+            <div className="flex items-center space-x-2">
+              <Calendar className="w-4 h-4" />
+              <span>
+                {report.data.period.start.toLocaleDateString()} - {report.data.period.end.toLocaleDateString()}
+              </span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <User className="w-4 h-4" />
+              <span>Generated by {report.generatedBy}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Clock className="w-4 h-4" />
+              <span>{report.generatedAt.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <p className="text-secondary-600 mb-4 text-sm">{report.data.summary}</p>
+      
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4 text-sm text-secondary-500">
+          <div className="flex items-center space-x-1">
+            <BarChart3 className="w-4 h-4" />
+            <span>{report.data.metrics.length} metrics</span>
+          </div>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => onView(report)}
+            className="btn btn-secondary btn-sm"
+          >
+            <Eye className="w-4 h-4 mr-2" />
+            View
+          </button>
+          <button
+            onClick={() => onDownload(report)}
+            className="btn btn-primary btn-sm"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Download
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReportFilters({ 
+  filters, 
+  onFiltersChange 
+}: { 
+  filters: { type: ReportType | 'all'; format: 'all' | 'pdf' | 'csv' | 'json' }
+  onFiltersChange: (filters: any) => void 
+}) {
+  return (
+    <div className="card p-6">
+      <h3 className="text-lg font-semibold text-secondary-900 mb-4">Filters</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Type Filter */}
+        <div>
+          <label className="label block text-sm font-medium text-secondary-700 mb-2">
+            Report Type
+          </label>
+          <select
+            value={filters.type}
+            onChange={(e) => onFiltersChange({ ...filters, type: e.target.value as any })}
+            className="input w-full"
+          >
+            <option value="all">All Types</option>
+            <option value="security_summary">Security Summary</option>
+            <option value="user_activity">User Activity</option>
+            <option value="transaction_analysis">Transaction Analysis</option>
+            <option value="threat_intelligence">Threat Intelligence</option>
+            <option value="compliance_report">Compliance Report</option>
+          </select>
+        </div>
+
+        {/* Format Filter */}
+        <div>
+          <label className="label block text-sm font-medium text-secondary-700 mb-2">
+            Format
+          </label>
+          <select
+            value={filters.format}
+            onChange={(e) => onFiltersChange({ ...filters, format: e.target.value as any })}
+            className="input w-full"
+          >
+            <option value="all">All Formats</option>
+            <option value="pdf">PDF</option>
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function ReportsPage() {
+  const [reports, setReports] = useState<Report[]>(mockReports)
+  const [filteredReports, setFilteredReports] = useState<Report[]>(mockReports)
+  const [filters, setFilters] = useState({
+    type: 'all' as ReportType | 'all',
+    format: 'all' as 'all' | 'pdf' | 'csv' | 'json',
+  })
+
+  // Filter reports based on filters
+  useEffect(() => {
+    let filtered = reports
+
+    // Apply type filter
+    if (filters.type !== 'all') {
+      filtered = filtered.filter(report => report.type === filters.type)
+    }
+
+    // Apply format filter
+    if (filters.format !== 'all') {
+      filtered = filtered.filter(report => report.format === filters.format)
+    }
+
+    setFilteredReports(filtered)
+  }, [reports, filters])
+
+  const handleViewReport = (report: Report) => {
+    console.log('View report:', report)
+    // In a real app, this would open a report viewer
+  }
+
+  const handleDownloadReport = (report: Report) => {
+    console.log('Download report:', report)
+    // In a real app, this would trigger a download
+  }
+
+  const reportStats = {
+    total: reports.length,
+    pdf: reports.filter(r => r.format === 'pdf').length,
+    csv: reports.filter(r => r.format === 'csv').length,
+    json: reports.filter(r => r.format === 'json').length,
+    thisWeek: reports.filter(r => 
+      r.generatedAt > new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+    ).length,
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-secondary-900">Reports</h1>
+          <p className="text-secondary-600">Generate and manage security reports</p>
+        </div>
+        <button className="btn btn-primary">
+          <FileText className="w-4 h-4 mr-2" />
+          Generate Report
+        </button>
+      </div>
+
+      {/* Report Statistics */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="card p-4 text-center">
+          <div className="text-2xl font-bold text-secondary-900">{reportStats.total}</div>
+          <div className="text-sm text-secondary-600">Total Reports</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="text-2xl font-bold text-danger-600">{reportStats.pdf}</div>
+          <div className="text-sm text-secondary-600">PDF Reports</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="text-2xl font-bold text-success-600">{reportStats.csv}</div>
+          <div className="text-sm text-secondary-600">CSV Reports</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="text-2xl font-bold text-warning-600">{reportStats.json}</div>
+          <div className="text-sm text-secondary-600">JSON Reports</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="text-2xl font-bold text-primary-600">{reportStats.thisWeek}</div>
+          <div className="text-sm text-secondary-600">This Week</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <ReportFilters filters={filters} onFiltersChange={setFilters} />
+
+      {/* Reports List */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-secondary-900">
+            Reports ({filteredReports.length})
+          </h2>
+          <div className="flex items-center space-x-2">
+            <button className="btn btn-secondary btn-sm">
+              <Filter className="w-4 h-4 mr-2" />
+              Export List
+            </button>
+          </div>
+        </div>
+
+        {filteredReports.length === 0 ? (
+          <div className="card p-12 text-center">
+            <FileText className="w-12 h-12 text-secondary-400 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-secondary-900 mb-2">No reports found</h3>
+            <p className="text-secondary-600">Try adjusting your filters or generate a new report.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {filteredReports.map((report) => (
+              <ReportCard
+                key={report.id}
+                report={report}
+                onView={handleViewReport}
+                onDownload={handleDownloadReport}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
