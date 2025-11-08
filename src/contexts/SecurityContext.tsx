@@ -103,39 +103,7 @@ interface SecurityContextType {
 const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
 export { SecurityContext }; // Export the context
 
-// Function to get security token with monitoring
-const getSecurityToken = async (type: string, userId: string): Promise<string | null> => {
-  const cachedToken = tokenCache.get(`${type}_${userId}`);
-  if (cachedToken) return cachedToken;
 
-  return monitoring.security.trackOperation('generateSecurityToken', async () => {
-    let newToken: string | null = null;
-    
-    try {
-      switch (type) {
-        case 'csrf':
-          newToken = await csrf.generateToken(userId);
-          break;
-        case 'session':
-          const fingerprint = localStorage.getItem('device_fingerprint');
-          if (fingerprint) {
-            const session = await sessionManager.createSession(userId, fingerprint);
-            newToken = session.id;
-          }
-          break;
-      }
-
-      if (newToken) {
-        tokenCache.set(`${type}_${userId}`, newToken, type === 'session' ? sessionTTL : csrfTTL);
-      }
-    } catch (error) {
-      console.error(`Failed to generate ${type} token:`, error);
-      return null;
-    }
-
-    return newToken;
-  });
-};
 
 const defaultConfig: SecurityConfig = {
   xss: {
@@ -175,29 +143,40 @@ const defaultConfig: SecurityConfig = {
   }
 }
 
-export function SecurityProvider({ 
+export const SecurityProvider: React.FC<{
+  children: React.ReactNode;
+  performanceConfig?: Partial<PerformanceConfig>;
+}> = ({
   children,
-  performanceConfig = DEFAULT_PERFORMANCE_CONFIG 
-}: { 
-  children: React.ReactNode
-  performanceConfig?: Partial<PerformanceConfig>
-}) {
-  // Initialize monitoring and services
-  const monitoring = useMonitoring({
+  performanceConfig = DEFAULT_PERFORMANCE_CONFIG
+}) => {
+  // Initialize security monitoring
+  const {
+    metrics,
+    security: monitoring
+  } = useMonitoring({
     componentName: 'SecurityContext',
     memoryInterval: performanceConfig.cleanupInterval,
     securityThreshold: performanceConfig.tokenCacheTTL,
     enableMemoryMetrics: performanceConfig.metricsEnabled,
     securityBatchSize: performanceConfig.maxBatchSize,
     securityBatchDelay: performanceConfig.batchDelay
-  })
+  });
 
   // Initialize security services
-  const services = useMemo(() => {
-    const middleware = new SecurityMiddleware(defaultConfig);
-    const manager = new SessionManager();
-    const csrfProtection = new CSRFProtection();
-    const xssProtection = new XSSProtection();
+  const {
+    middleware: securityMiddleware,
+    sessionManager,
+    csrf,
+    xss,
+    tokenCache
+  } = useMemo(() => ({
+    middleware: new SecurityMiddleware(defaultConfig),
+    sessionManager: new SessionManager(),
+    csrf: new CSRFProtection(),
+    xss: new XSSProtection(),
+    tokenCache: new SecurityTokenCache()
+  }), []);
     const cache = new SecurityTokenCache(performanceConfig.tokenCacheTTL);
     
     return {
