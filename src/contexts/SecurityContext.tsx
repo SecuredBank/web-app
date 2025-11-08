@@ -84,7 +84,43 @@ interface SecurityContextType {
   resumeInactivityMonitoring: () => void
 }
 
-const SecurityContext = createContext<SecurityContextType | undefined>(undefined)
+// Create and export security context
+const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
+export { SecurityContext }; // Export the context
+
+// Function to get security token with monitoring
+const getSecurityToken = async (type: string, userId: string): Promise<string | null> => {
+  const cachedToken = tokenCache.get(`${type}_${userId}`);
+  if (cachedToken) return cachedToken;
+
+  return monitoring.security.trackOperation('generateSecurityToken', async () => {
+    let newToken: string | null = null;
+    
+    try {
+      switch (type) {
+        case 'csrf':
+          newToken = await csrf.generateToken(userId);
+          break;
+        case 'session':
+          const fingerprint = localStorage.getItem('device_fingerprint');
+          if (fingerprint) {
+            const session = await sessionManager.createSession(userId, fingerprint);
+            newToken = session.id;
+          }
+          break;
+      }
+
+      if (newToken) {
+        tokenCache.set(`${type}_${userId}`, newToken, type === 'session' ? sessionTTL : csrfTTL);
+      }
+    } catch (error) {
+      console.error(`Failed to generate ${type} token:`, error);
+      return null;
+    }
+
+    return newToken;
+  });
+};
 
 const defaultConfig: SecurityConfig = {
   xss: {
@@ -205,16 +241,28 @@ export function SecurityProvider({
   }
   
   // Handle security timeout
-  const handleSecurityTimeout = () => {
-    if (!defaultConfig.accessibility.logoutOnInactivity || inactivityPaused.current) return
+  const handleSecurityTimeout = useCallback(() => {
+    if (!defaultConfig.accessibility.logoutOnInactivity || inactivityPaused.current) return;
     
-    clearSensitiveData()
-    refreshSecurity()
-    announceSecurityEvent('Session timed out due to inactivity', 'assertive')
-    
-    // Reset focus to login form or appropriate element
-    resetSecurityFocus()
-  }
+    monitoring.security.trackOperation('securityTimeout', async () => {
+      try {
+        clearSensitiveData();
+        await refreshSecurity();
+        announceSecurityEvent('Session timed out due to inactivity', 'assertive');
+        resetSecurityFocus();
+      } catch (error) {
+        console.error('Security timeout handling failed:', error);
+        announceSecurityEvent('Security timeout error occurred', 'assertive');
+      }
+    });
+  }, [
+    defaultConfig.accessibility.logoutOnInactivity,
+    clearSensitiveData,
+    refreshSecurity,
+    announceSecurityEvent,
+    resetSecurityFocus,
+    monitoring.security
+  ]);
   
   // Reset focus after security events
   const resetSecurityFocus = () => {
@@ -517,10 +565,11 @@ export function SecurityProvider({
 
 
 
-  // Event listener management with monitoring
+  // Event listener management with monitoring and cleanup
   useEffect(() => {
     if (!defaultConfig.accessibility.logoutOnInactivity) return;
 
+    const cleanupQueue = new Set<() => void>();
     const setupListeners = async () => {
       return monitoring.security.trackOperation('setupEventListeners', async () => {
         // Map of events to their throttled/debounced handlers
@@ -533,42 +582,75 @@ export function SecurityProvider({
           ['touchmove', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
           ['focus', monitorInactivity]
         ]);
-        
-        // Batch add event listeners
-        await queueSecurityUpdate(async () => {
-          for (const [event, handler] of eventHandlers.entries()) {
-            window.addEventListener(event, handler, { passive: true });
-          }
-        });
-        
+
+        // Add event listeners one by one to avoid blocking the main thread
+        for (const [event, handler] of eventHandlers.entries()) {
+          window.addEventListener(event, handler, { passive: true });
+          cleanupQueue.add(() => window.removeEventListener(event, handler));
+        }
+
         monitorInactivity(); // Start initial timer
+
+        if (inactivityTimer.current) {
+          cleanupQueue.add(() => window.clearTimeout(inactivityTimer.current));
+        }
         
+        if (batchTimeout.current) {
+          cleanupQueue.add(() => window.clearTimeout(batchTimeout.current));
+        }
+
         return () => {
-          // Batch remove event listeners
-          for (const [event, handler] of eventHandlers.entries()) {
-            window.removeEventListener(event, handler);
-          }
-          
-          if (inactivityTimer.current) {
-            window.clearTimeout(inactivityTimer.current);
-          }
-          
-          if (batchTimeout.current) {
-            window.clearTimeout(batchTimeout.current);
-          }
+          // Execute all cleanup functions in reverse order
+          Array.from(cleanupQueue).reverse().forEach(cleanup => cleanup());
+          cleanupQueue.clear();
         };
       });
     };
 
-    const cleanupPromise = setupListeners();
-    return () => {
-      cleanupPromise.then(cleanup => cleanup && cleanup());
-    };
-  }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce, queueSecurityUpdate]);
+    // Set up listeners and store cleanup function
+    let cleanup: (() => void) | undefined;
+    setupListeners().then(cleanupFn => {
+      cleanup = cleanupFn;
+    });
 
-  const value: SecurityContextType = {
+    // Return cleanup function that will be called when component unmounts
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce]);
+
+  const contextValue: SecurityContextType = {
     securityMiddleware,
     sessionManager,
+    csrf,
+    xss,
+    refreshSecurity,
+    announceSecurityEvent,
+    clearSensitiveData,
+    handleSecurityTimeout,
+    resetSecurityFocus,
+    isSecureInputFocused,
+    startSecureSession,
+    endSecureSession,
+    monitorInactivity,
+    pauseInactivityMonitoring,
+    resumeInactivityMonitoring
+  };
+
+  return (
+    <SecurityContext.Provider value={contextValue}>
+      {children}
+    </SecurityContext.Provider>
+  );
+}
+
+export const useSecurity = () => {
+  const context = useContext(SecurityContext);
+  if (!context) {
+    throw new Error('useSecurity must be used within a SecurityProvider');
+  }
+  return context;
+}
     csrf,
     xss,
     refreshSecurity,
