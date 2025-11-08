@@ -148,13 +148,15 @@ export const SecurityProvider: React.FC<{
   performanceConfig?: Partial<PerformanceConfig>;
 }> = ({
   children,
-  performanceConfig = DEFAULT_PERFORMANCE_CONFIG
+  performanceConfig: userConfig
 }) => {
-  // Initialize security monitoring
-  const {
-    metrics,
-    security: monitoring
-  } = useMonitoring({
+  // Merge user config with defaults
+  const performanceConfig = useMemo(() => ({
+    ...DEFAULT_PERFORMANCE_CONFIG,
+    ...userConfig
+  }), [userConfig]);
+  // Initialize monitoring service
+  const { security: monitoring } = useMonitoring({
     componentName: 'SecurityContext',
     memoryInterval: performanceConfig.cleanupInterval,
     securityThreshold: performanceConfig.tokenCacheTTL,
@@ -164,19 +166,28 @@ export const SecurityProvider: React.FC<{
   });
 
   // Initialize security services
-  const {
-    middleware: securityMiddleware,
-    sessionManager,
-    csrf,
-    xss,
-    tokenCache
-  } = useMemo(() => ({
-    middleware: new SecurityMiddleware(defaultConfig),
-    sessionManager: new SessionManager(),
-    csrf: new CSRFProtection(),
-    xss: new XSSProtection(),
-    tokenCache: new SecurityTokenCache()
-  }), []);
+  const services = useMemo(() => {
+    const middleware = new SecurityMiddleware({
+      xss: { enabled: true },
+      csrf: { enabled: true },
+      session: { enabled: true },
+      cors: { enabled: true },
+      rateLimit: { enabled: true },
+      accessibility: { enabled: true }
+    });
+    const manager = new SessionManager();
+    const csrfProtection = new CSRFProtection();
+    const xssProtection = new XSSProtection();
+    const cache = new SecurityTokenCache();
+
+    return {
+      securityMiddleware: middleware,
+      sessionManager: manager,
+      csrf: csrfProtection,
+      xss: xssProtection,
+      tokenCache: cache
+    };
+  }, []);
     const cache = new SecurityTokenCache(performanceConfig.tokenCacheTTL);
     
     return {
