@@ -1,3 +1,5 @@
+import { ReactNode } from 'react'
+
 // User and Authentication Types
 export interface User {
   id: string
@@ -8,16 +10,42 @@ export interface User {
   lastLogin?: Date
   isActive: boolean
   permissions: Permission[]
+  department?: string
+  phoneNumber?: string
+  mfaEnabled: boolean
+  failedLoginAttempts: number
+  lastPasswordChange: Date
+  passwordExpiryDate: Date
+  sessionTimeout: number
 }
 
-export type UserRole = 'admin' | 'security_officer' | 'analyst' | 'viewer'
+export type UserRole = 
+  | 'admin' 
+  | 'security_officer' 
+  | 'analyst' 
+  | 'viewer' 
+  | 'auditor' 
+  | 'risk_manager'
 
 export interface Permission {
   id: string
   name: string
   resource: string
-  action: string
+  action: PermissionAction
+  conditions?: Record<string, any>
+  grantedAt: Date
+  grantedBy: string
+  expiresAt?: Date
 }
+
+export type PermissionAction = 
+  | 'create' 
+  | 'read' 
+  | 'update' 
+  | 'delete' 
+  | 'manage' 
+  | 'approve' 
+  | 'reject'
 
 // Security Types
 export interface SecurityAlert {
@@ -32,6 +60,53 @@ export interface SecurityAlert {
   assignedTo?: string
   resolvedAt?: Date
   metadata?: Record<string, any>
+  ipAddress?: string
+  location?: GeoLocation
+  deviceInfo?: DeviceInfo
+  relatedAlerts?: string[]
+  priority: number
+  escalationLevel: number
+  responseActions: ResponseAction[]
+  auditTrail: AuditEvent[]
+}
+
+export interface GeoLocation {
+  latitude: number
+  longitude: number
+  country: string
+  city: string
+  region: string
+}
+
+export interface DeviceInfo {
+  id: string
+  type: string
+  os: string
+  browser: string
+  ip: string
+  userAgent: string
+  lastSeen: Date
+  trusted: boolean
+}
+
+export interface ResponseAction {
+  id: string
+  type: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  timestamp: Date
+  performedBy?: string
+  result?: string
+}
+
+export interface AuditEvent {
+  id: string
+  timestamp: Date
+  action: string
+  performedBy: string
+  details: Record<string, any>
+  ipAddress: string
+  success: boolean
 }
 
 export type AlertType = 
@@ -43,10 +118,140 @@ export type AlertType =
   | 'system_intrusion'
   | 'phishing_attempt'
   | 'ddos_attack'
+  | 'privilege_escalation'
+  | 'configuration_change'
+  | 'firewall_breach'
+  | 'data_exfiltration'
+  | 'ransomware_detected'
+  | 'api_abuse'
+  | 'brute_force_attempt'
 
 export type AlertSeverity = 'low' | 'medium' | 'high' | 'critical'
 
-export type AlertStatus = 'open' | 'investigating' | 'resolved' | 'false_positive'
+export type AlertStatus = 
+  | 'open' 
+  | 'investigating' 
+  | 'resolved' 
+  | 'false_positive' 
+  | 'escalated'
+  | 'pending_review'
+  | 'mitigated'
+  | 'remediated'
+
+// Component Types
+export interface BaseProps {
+  className?: string
+  children?: ReactNode
+}
+
+export interface ButtonProps extends BaseProps {
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
+  size?: 'sm' | 'md' | 'lg'
+  isLoading?: boolean
+  disabled?: boolean
+  type?: 'button' | 'submit' | 'reset'
+  onClick?: () => void
+}
+
+export interface InputProps extends BaseProps {
+  type?: 'text' | 'password' | 'email' | 'number' | 'tel' | 'url'
+  label?: string
+  placeholder?: string
+  value?: string | number
+  error?: string
+  disabled?: boolean
+  required?: boolean
+  onChange?: (value: string) => void
+}
+
+export interface SelectProps<T> extends BaseProps {
+  options: Array<{
+    label: string
+    value: T
+    disabled?: boolean
+  }>
+  label?: string
+  value?: T
+  placeholder?: string
+  error?: string
+  disabled?: boolean
+  required?: boolean
+  onChange?: (value: T) => void
+}
+
+export interface CardProps extends BaseProps {
+  title?: string | ReactNode
+  description?: string | ReactNode
+  footer?: ReactNode
+  headerAction?: ReactNode
+}
+
+export interface ModalProps extends BaseProps {
+  isOpen: boolean
+  onClose: () => void
+  title?: string | ReactNode
+  description?: string | ReactNode
+  size?: 'sm' | 'md' | 'lg' | 'xl'
+}
+
+export interface AlertProps extends BaseProps {
+  title?: string
+  variant?: 'info' | 'success' | 'warning' | 'error'
+  closable?: boolean
+  onClose?: () => void
+}
+
+export interface ToastProps {
+  title: string
+  description?: string
+  type?: 'info' | 'success' | 'warning' | 'error'
+  duration?: number
+}
+
+export interface TabsProps extends BaseProps {
+  tabs: Array<{
+    id: string
+    label: string
+    content: ReactNode
+    disabled?: boolean
+  }>
+  defaultTab?: string
+  onChange?: (tabId: string) => void
+}
+
+// Chart Types
+export interface ChartData {
+  label: string
+  value: number
+  color?: string
+}
+
+export interface LineChartProps extends BaseProps {
+  data: Array<{
+    date: Date | string
+    value: number
+    category?: string
+  }>
+  height?: number
+  width?: number
+  showLegend?: boolean
+}
+
+export interface BarChartProps extends BaseProps {
+  data: ChartData[]
+  height?: number
+  width?: number
+  showLegend?: boolean
+  horizontal?: boolean
+}
+
+export interface PieChartProps extends BaseProps {
+  data: ChartData[]
+  height?: number
+  width?: number
+  showLegend?: boolean
+  donut?: boolean
+}
 
 // Dashboard Types
 export interface DashboardStats {
