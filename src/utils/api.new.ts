@@ -1,5 +1,8 @@
 import { API_BASE_URL, API_TIMEOUT } from '../constants'
 import { createSecureHeaders, validateTokenExpiry } from './securityUtils'
+import { CSRFProtection } from './csrfProtection'
+import { XSSProtection } from './xssProtection'
+import { SessionManager } from './sessionManager'
 
 // API Response types
 export interface ApiResponse<T> {
@@ -35,11 +38,16 @@ export class ApiClient {
   private baseURL: string
   private defaultTimeout: number
   private defaultHeaders: Record<string, string>
-  private refreshPromise: Promise<string> | null = null
+  private csrf: CSRFProtection
+  private xss: XSSProtection
+  private sessionManager: SessionManager
 
   constructor(baseURL: string = API_BASE_URL, timeout: number = API_TIMEOUT) {
     this.baseURL = baseURL
     this.defaultTimeout = timeout
+    this.csrf = new CSRFProtection()
+    this.xss = new XSSProtection()
+    this.sessionManager = new SessionManager()
 
     // Convert Headers to plain object
     const headers = createSecureHeaders()
