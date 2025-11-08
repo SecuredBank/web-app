@@ -1,0 +1,1167 @@
+import React, { createContext, useContext, useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { SecurityMiddleware } from '../utils/securityMiddleware';
+import { SessionManager } from '../utils/sessionManager';
+import { CSRFProtection } from '../utils/csrfProtection';
+import { XSSProtection } from '../utils/xssProtection';
+import { encryptData } from '../utils/securityUtils';
+import { useA11y } from './A11yContext';
+import { useDebounce } from '../hooks/useDebounce';
+import { useMonitoring } from '../hooks/useMonitoring';
+
+// Types
+interface SecurityEvent {
+  type: SecurityEventType;
+  timestamp: number;
+  data?: any;
+}
+
+type SecurityEventType =
+  | 'SESSION_EXPIRED'
+  | 'TOKEN_REFRESH'
+  | 'SECURITY_VIOLATION'
+  | 'ACCESS_DENIED'
+  | 'AUTH_SUCCESS'
+  | 'AUTH_FAILURE';
+
+interface SecurityMetrics {
+  events: SecurityEvent[];
+  violations: number;
+  successfulAuths: number;
+  failedAuths: number;
+  averageResponseTime: number;
+}
+
+interface PerformanceConfig {
+  tokenCacheTTL: number;
+  operationCacheTTL: number;
+  batchDelay: number;
+  highFrequencyDebounce: number;
+  maxBatchSize: number;
+  cleanupInterval: number;
+  metricsEnabled: boolean;
+}
+
+interface SecurityConfig {
+  xss?: { enabled: boolean };
+  csrf?: {
+    enabled: boolean;
+    ignoredPaths?: string[];
+  };
+  session?: {
+    enabled: boolean;
+    renewOnRequest?: boolean;
+  };
+  cors?: {
+    enabled: boolean;
+    allowedOrigins?: string[];
+    allowedMethods?: string[];
+    allowedHeaders?: string[];
+    exposedHeaders?: string[];
+    maxAge?: number;
+  };
+  rateLimit?: {
+    enabled: boolean;
+    windowMs?: number;
+    maxRequests?: number;
+  };
+  accessibility?: {
+    enabled: boolean;
+    logoutOnInactivity?: boolean;
+    inactivityTimeout?: number;
+    screenReaderWarnings?: boolean;
+    autoRefreshTokens?: boolean;
+    sessionAlerts?: boolean;
+    keyboardTimeout?: number;
+    focusResetOnNavigation?: boolean;
+    visualFeedbackDuration?: number;
+  };
+}
+
+// Types
+interface PerformanceConfig {
+  tokenCacheTTL: number;
+  operationCacheTTL: number;
+  batchDelay: number;
+  highFrequencyDebounce: number;
+  maxBatchSize: number;
+  cleanupInterval: number;
+  metricsEnabled: boolean;
+}
+
+interface SecurityConfig {
+  xss: { 
+    enabled: boolean;
+  };
+  csrf: {
+    enabled: boolean;
+    ignoredPaths?: string[];
+  };
+  session: {
+    enabled: boolean;
+    renewOnRequest?: boolean;
+  };
+  cors: {
+    enabled: boolean;
+    allowedOrigins?: string[];
+    allowedMethods?: string[];
+    allowedHeaders?: string[];
+    exposedHeaders?: string[];
+    maxAge?: number;
+  };
+  rateLimit: {
+    enabled: boolean;
+    windowMs?: number;
+    maxRequests?: number;
+  };
+  accessibility: {
+    enabled: boolean;
+    logoutOnInactivity?: boolean;
+    inactivityTimeout?: number;
+    screenReaderWarnings?: boolean;
+    autoRefreshTokens?: boolean;
+    sessionAlerts?: boolean;
+    keyboardTimeout?: number;
+    focusResetOnNavigation?: boolean;
+    visualFeedbackDuration?: number;
+  };
+}
+
+// Context type definition
+interface SecurityContextType {
+  isSecureInputFocused: boolean;
+  updateSecuritySettings: (settings: Partial<SecurityConfig>) => Promise<void>;
+  toggleSecureInput: (focused: boolean) => void;
+  processSecurityEvent: (event: SecurityEvent) => void;
+  services: {
+    securityMiddleware: SecurityMiddleware;
+    sessionManager: SessionManager;
+    csrf: CSRFProtection;
+    xss: XSSProtection;
+    tokenCache: SecurityTokenCache;
+  };
+  performance: {
+    metricsEnabled: boolean;
+    batchSize: number;
+    batchDelay: number;
+    cleanupInterval: number;
+  };
+  monitoring: {
+    logSecurityEvent: (event: SecurityEvent) => void;
+    getMetrics: () => SecurityMetrics;
+    clearMetrics: () => void;
+  };
+}
+
+interface SecurityEvent {
+  type: SecurityEventType;
+  timestamp: number;
+  data?: any;
+}
+
+type SecurityEventType = 
+  | 'SESSION_EXPIRED'
+  | 'TOKEN_REFRESH'
+  | 'SECURITY_VIOLATION'
+  | 'ACCESS_DENIED'
+  | 'AUTH_SUCCESS'
+  | 'AUTH_FAILURE';
+
+interface SecurityMetrics {
+  events: SecurityEvent[];
+  violations: number;
+  successfulAuths: number;
+  failedAuths: number;
+  averageResponseTime: number;
+}
+
+// Constants with defaults
+const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
+  tokenCacheTTL: 3600000,
+  operationCacheTTL: 300000,
+  batchDelay: 1000,
+  highFrequencyDebounce: 100,
+  maxBatchSize: 100,
+  cleanupInterval: 300000,
+  metricsEnabled: true
+};
+
+const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
+  xss: {
+    enabled: true
+  },
+  csrf: {
+    enabled: true,
+    ignoredPaths: []
+  },
+  session: {
+    enabled: true,
+    renewOnRequest: true
+  },
+  cors: {
+    enabled: true,
+    allowedOrigins: ['*'],
+    allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: [],
+    maxAge: 86400
+  },
+  rateLimit: {
+    enabled: true,
+    windowMs: 900000,
+    maxRequests: 100
+  },
+  accessibility: {
+    enabled: true,
+    logoutOnInactivity: true,
+    inactivityTimeout: 900000,
+    screenReaderWarnings: true,
+    autoRefreshTokens: true,
+    sessionAlerts: true,
+    keyboardTimeout: 30000,
+    focusResetOnNavigation: true,
+    visualFeedbackDuration: 2000
+  }
+};
+
+// Context creation
+const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
+
+// Custom hook for using security context
+export const useSecurity = (): SecurityContextType => {
+  const context = useContext(SecurityContext);
+  if (!context) {
+    throw new Error('useSecurity must be used within a SecurityProvider');
+  }
+  return context;
+};
+
+// Create the context
+const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
+
+// Types and Interfaces
+interface PerformanceConfig {
+  tokenCacheTTL: number;
+  operationCacheTTL: number;
+  batchDelay: number;
+  highFrequencyDebounce: number;
+  maxBatchSize: number;
+  cleanupInterval: number;
+  metricsEnabled: boolean;
+}
+
+interface SecurityConfig {
+  xss?: { enabled: boolean };
+  csrf?: {
+    enabled: boolean;
+    ignoredPaths?: string[];
+  };
+  session?: {
+    enabled: boolean;
+    renewOnRequest?: boolean;
+  };
+  cors?: {
+    enabled: boolean;
+    allowedOrigins?: string[];
+    allowedMethods?: string[];
+    allowedHeaders?: string[];
+    exposedHeaders?: string[];
+    maxAge?: number;
+  };
+  rateLimit?: {
+    enabled: boolean;
+    windowMs?: number;
+    maxRequests?: number;
+  };
+  accessibility?: {
+    enabled: boolean;
+    logoutOnInactivity?: boolean;
+    inactivityTimeout?: number;
+    screenReaderWarnings?: boolean;
+    autoRefreshTokens?: boolean;
+    sessionAlerts?: boolean;
+    keyboardTimeout?: number;
+    focusResetOnNavigation?: boolean;
+    visualFeedbackDuration?: number;
+  };
+}
+
+interface SecurityContextType {
+  // Core security services
+  securityMiddleware: SecurityMiddleware;
+  sessionManager: SessionManager;
+  csrf: CSRFProtection;
+  xss: XSSProtection;
+
+  // Token and session management
+  refreshSecurity: () => Promise<void>;
+  getSecurityToken: (type: string, userId: string) => Promise<string | null>;
+  queueSecurityUpdate: (update: () => Promise<void>) => void;
+
+  // Security state
+  isSecureInputFocused: boolean;
+
+  // Event handlers
+  monitorInactivity: () => void;
+  handleSecurityTimeout: () => void;
+  resetSecurityFocus: () => void;
+  startSecureSession: () => void;
+  endSecureSession: () => void;
+  pauseInactivityMonitoring: () => void;
+  resumeInactivityMonitoring: () => void;
+
+  // Utilities
+  announceSecurityEvent: (message: string, priority?: 'polite' | 'assertive') => void;
+  clearSensitiveData: () => Promise<void>;
+}
+
+// Constants
+const TOKEN_CACHE_TTL = 300000; // 5 minutes
+const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
+  tokenCacheTTL: TOKEN_CACHE_TTL,
+  operationCacheTTL: 60000,
+  batchDelay: 100,
+  highFrequencyDebounce: 250,
+  maxBatchSize: 50,
+  cleanupInterval: 300000,
+  metricsEnabled: process.env.NODE_ENV === 'development'
+};
+
+const DEFAULT_SECURITY_CONFIG: Required<SecurityConfig> = {
+  xss: { enabled: true },
+  csrf: {
+    enabled: true,
+    ignoredPaths: ['/api/login', '/api/register']
+  },
+  session: {
+    enabled: true,
+    renewOnRequest: true
+  },
+  cors: {
+    enabled: true,
+    allowedOrigins: [window.location.origin],
+    allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    exposedHeaders: ['X-CSRF-Token'],
+    maxAge: 7200
+  },
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,
+    maxRequests: 100
+  },
+  accessibility: {
+    enabled: true,
+    logoutOnInactivity: true,
+    inactivityTimeout: 300000,
+    screenReaderWarnings: true,
+    autoRefreshTokens: true,
+    sessionAlerts: true,
+    keyboardTimeout: 30000,
+    focusResetOnNavigation: true,
+    visualFeedbackDuration: 2000
+  }
+};
+
+// Create context
+const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
+
+// Provider Props type
+interface SecurityProviderProps {
+  children: React.ReactNode;
+  performanceConfig?: Partial<PerformanceConfig>;
+  securityConfig?: Partial<SecurityConfig>;
+}
+
+// Provider Component
+export const SecurityProvider: React.FC<SecurityProviderProps> = ({
+  children,
+  performanceConfig: userPerformanceConfig,
+  securityConfig: userSecurityConfig
+}): React.ReactElement => {
+  // Component state
+  const [isSecureInputFocused, setIsSecureInputFocused] = useState(false);
+  const inactivityPaused = useRef(false);
+  const pendingUpdates = useRef<Set<() => Promise<void>>>(new Set());
+  const batchTimeout = useRef<number>();
+  const inactivityTimer = useRef<number>();
+
+  // Get accessibility context
+  const a11y = useA11y();
+
+  // Merge configs with defaults
+  const performanceConfig = useMemo(() => ({
+    ...DEFAULT_PERFORMANCE_CONFIG,
+    ...userPerformanceConfig
+  }), [userPerformanceConfig]);
+
+  const securityConfig = useMemo(() => ({
+    ...DEFAULT_SECURITY_CONFIG,
+    ...userSecurityConfig
+  }), [userSecurityConfig]);
+
+  // Initialize monitoring service
+  const { security: monitoring } = useMonitoring({
+    componentName: 'SecurityContext',
+    memoryInterval: performanceConfig.cleanupInterval,
+    securityThreshold: performanceConfig.tokenCacheTTL,
+    enableMemoryMetrics: performanceConfig.metricsEnabled,
+    securityBatchSize: performanceConfig.maxBatchSize,
+    securityBatchDelay: performanceConfig.batchDelay
+  });
+
+  // Initialize security services
+  const services = useMemo(() => {
+    const middleware = new SecurityMiddleware(securityConfig);
+    const session = new SessionManager();
+    const csrfProtection = new CSRFProtection();
+    const xssProtection = new XSSProtection();
+    const cache = new SecurityTokenCache(performanceConfig.tokenCacheTTL);
+
+    return {
+      securityMiddleware: middleware,
+      sessionManager: session,
+      csrf: csrfProtection,
+      xss: xssProtection,
+      tokenCache: cache
+    };
+  }, [securityConfig, performanceConfig.tokenCacheTTL]);
+
+interface PerformanceConfig {
+  tokenCacheTTL: number
+  operationCacheTTL: number
+  batchDelay: number
+  highFrequencyDebounce: number
+  maxBatchSize: number
+  cleanupInterval: number
+  metricsEnabled: boolean
+}
+
+// Token and cache TTL values
+const TOKEN_CACHE_TTL = 300000; // 5 minutes
+const SESSION_TTL = 3600000; // 1 hour
+const CSRF_TTL = 300000; // 5 minutes
+
+const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
+  tokenCacheTTL: TOKEN_CACHE_TTL,
+  operationCacheTTL: 60000, // 1 minute
+  batchDelay: 100, // 100ms
+  highFrequencyDebounce: 250, // 250ms
+  maxBatchSize: 50,
+  cleanupInterval: 300000, // 5 minutes
+  metricsEnabled: process.env.NODE_ENV === 'development'
+}
+
+interface SecurityConfig {
+  xss?: { enabled: boolean }
+  csrf?: {
+    enabled: boolean
+    ignoredPaths?: string[]
+  }
+  session?: {
+    enabled: boolean
+    renewOnRequest?: boolean
+  }
+  cors?: {
+    enabled: boolean
+    allowedOrigins?: string[]
+    allowedMethods?: string[]
+    allowedHeaders?: string[]
+    exposedHeaders?: string[]
+    maxAge?: number
+  }
+  rateLimit?: {
+    enabled: boolean
+    windowMs?: number
+    maxRequests?: number
+  }
+  accessibility?: {
+    enabled: boolean
+    logoutOnInactivity?: boolean
+    inactivityTimeout?: number
+    screenReaderWarnings?: boolean
+    autoRefreshTokens?: boolean
+    sessionAlerts?: boolean
+    keyboardTimeout?: number
+    focusResetOnNavigation?: boolean
+    visualFeedbackDuration?: number
+  }
+}
+
+interface SecurityContextType {
+  // Core security services
+  securityMiddleware: SecurityMiddleware;
+  sessionManager: SessionManager;
+  csrf: CSRFProtection;
+  xss: XSSProtection;
+
+  // Token and session management
+  refreshSecurity: () => Promise<void>;
+  getSecurityToken: (type: string, userId: string) => Promise<string | null>;
+  queueSecurityUpdate: (update: () => Promise<void>) => void;
+
+  // Security state
+  isSecureInputFocused: boolean;
+
+  // Event handlers
+  monitorInactivity: () => void;
+  handleSecurityTimeout: () => void;
+  resetSecurityFocus: () => void;
+  startSecureSession: () => void;
+  endSecureSession: () => void;
+  pauseInactivityMonitoring: () => void;
+  resumeInactivityMonitoring: () => void;
+
+  // Utilities
+  announceSecurityEvent: (message: string, priority?: 'polite' | 'assertive') => void;
+  clearSensitiveData: () => void;
+}
+
+// Create and export security context
+const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
+export { SecurityContext }; // Export the context
+
+
+
+const DEFAULT_CONFIG: Required<SecurityConfig> = {
+  xss: {
+    enabled: true
+  },
+  csrf: {
+    enabled: true,
+    ignoredPaths: ['/api/login', '/api/register']
+  },
+  session: {
+    enabled: true,
+    renewOnRequest: true
+  },
+  cors: {
+    enabled: true,
+    allowedOrigins: [window.location.origin],
+    allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    exposedHeaders: ['X-CSRF-Token'],
+    maxAge: 7200
+  },
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000, // 1 minute
+    maxRequests: 100
+  },
+  accessibility: {
+    enabled: true,
+    logoutOnInactivity: true,
+    inactivityTimeout: 300000, // 5 minutes
+    screenReaderWarnings: true,
+    autoRefreshTokens: true,
+    sessionAlerts: true,
+    keyboardTimeout: 30000, // 30 seconds
+    focusResetOnNavigation: true,
+    visualFeedbackDuration: 2000 // 2 seconds
+  }
+}
+
+// Context creation
+const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
+
+// Provider component
+export const SecurityProvider: React.FC<{
+  children: React.ReactNode;
+  performanceConfig?: Partial<PerformanceConfig>;
+  securityConfig?: Partial<SecurityConfig>;
+}> = ({
+  children,
+  performanceConfig: userPerformanceConfig,
+  securityConfig: userSecurityConfig
+}): React.ReactElement => {
+  // Component state
+  const [isSecureInputFocused, setIsSecureInputFocused] = useState(false);
+  const inactivityPaused = useRef(false);
+  const pendingUpdates = useRef<Set<() => Promise<void>>>(new Set());
+  const batchTimeout = useRef<number>();
+  const inactivityTimer = useRef<number>();
+
+  // Merge configs with defaults
+  const performanceConfig = useMemo(() => ({
+    ...DEFAULT_PERFORMANCE_CONFIG,
+    ...userPerformanceConfig
+  }), [userPerformanceConfig]);
+
+  const mergedSecurityConfig = useMemo(() => ({
+    ...DEFAULT_CONFIG,
+    ...userSecurityConfig
+  }), [userSecurityConfig]);
+
+  // Initialize monitoring service
+  const { security: monitoring } = useMonitoring({
+    componentName: 'SecurityContext',
+    memoryInterval: performanceConfig.cleanupInterval,
+    securityThreshold: performanceConfig.tokenCacheTTL,
+    enableMemoryMetrics: performanceConfig.metricsEnabled,
+    securityBatchSize: performanceConfig.maxBatchSize,
+    securityBatchDelay: performanceConfig.batchDelay
+  });
+
+  // Initialize security services
+  const services = useMemo(() => {
+    const middleware = new SecurityMiddleware(mergedSecurityConfig);
+    const session = new SessionManager();
+    const csrfProtection = new CSRFProtection();
+    const xssProtection = new XSSProtection();
+    const cache = new SecurityTokenCache(performanceConfig.tokenCacheTTL);
+
+    return {
+      securityMiddleware: middleware,
+      sessionManager: session,
+      csrf: csrfProtection,
+      xss: xssProtection,
+      tokenCache: cache
+    };
+  }, [mergedSecurityConfig, performanceConfig.tokenCacheTTL]);
+
+  // Create security context value
+  const value = useMemo<SecurityContextType>(() => ({
+    securityMiddleware: services.securityMiddleware,
+    sessionManager: services.sessionManager,
+    csrf: services.csrf,
+    xss: services.xss,
+    isSecureInputFocused,
+
+    refreshSecurity: async () => {
+      await monitoring.trackOperation('refreshSecurity', async () => {
+        await services.tokenCache.clear();
+        await services.sessionManager.refresh();
+      });
+    },
+
+    getSecurityToken: async (type: string, userId: string) => {
+      return monitoring.trackOperation('getSecurityToken', async () => {
+        const token = await services.tokenCache.get(`${type}-${userId}`);
+        if (token) return token;
+        return null;
+      });
+    },
+
+    queueSecurityUpdate: (update) => {
+      monitoring.trackOperation('queueUpdate', update);
+    },
+
+    monitorInactivity: () => {
+      if (!mergedSecurityConfig.accessibility?.logoutOnInactivity || inactivityPaused.current) return;
+      // Inactivity monitoring implementation...
+    },
+
+    handleSecurityTimeout: () => {
+      if (!mergedSecurityConfig.accessibility?.sessionAlerts) return;
+      // Timeout handling implementation...
+    },
+
+    resetSecurityFocus: () => {
+      if (!mergedSecurityConfig.accessibility?.focusResetOnNavigation) return;
+      // Focus reset implementation...
+    },
+
+    startSecureSession: () => setIsSecureInputFocused(true),
+    endSecureSession: () => setIsSecureInputFocused(false),
+    pauseInactivityMonitoring: () => { inactivityPaused.current = true; },
+    resumeInactivityMonitoring: () => { inactivityPaused.current = false; },
+
+    announceSecurityEvent: (message: string, priority?: 'polite' | 'assertive') => {
+      if (mergedSecurityConfig.accessibility?.screenReaderWarnings) {
+        // Announcement implementation...
+      }
+    },
+
+    clearSensitiveData: () => {
+      return monitoring.trackOperation('clearSensitiveData', async () => {
+        await services.tokenCache.clear();
+      });
+    }
+  }), [
+    services,
+    monitoring,
+    isSecureInputFocused,
+    mergedSecurityConfig.accessibility
+  ]);
+
+  // Return provider
+  return (
+    <SecurityContext.Provider value={value}>
+      {children}
+    </SecurityContext.Provider>
+  );
+    };
+  }, [performanceConfig.tokenCacheTTL]);
+
+  // Extract services
+  const securityMiddleware = services.securityMiddleware;
+  const sessionManager = services.sessionManager;
+  const csrf = services.csrf;
+  const xss = services.xss;
+  const tokenCache = services.tokenCache;
+  
+  // Track batch updates
+  const pendingUpdates = useRef<Set<() => Promise<void>>>(new Set())
+  const batchTimeout = useRef<number>()
+  
+  // Get accessibility context
+  const a11y = useA11y()
+  
+  // Track secure input focus
+  const [isSecureInputFocused, setIsSecureInputFocused] = useState(false)
+  
+  // Track inactivity timer
+  const inactivityTimer = useRef<number>()
+  const inactivityPaused = useRef(false)
+  
+  // Announce security events using screen reader
+  const announceSecurityEvent = (message: string, priority: 'polite' | 'assertive' = 'polite') => {
+    if (defaultConfig.accessibility.screenReaderWarnings) {
+      a11y.announce(message, priority)
+    }
+  }
+  
+  // Clear sensitive data from forms and state with performance tracking
+  const clearSensitiveData = () => {
+    monitoring.security.trackOperation('clearSensitiveData', async () => {
+    // Clear form fields with sensitive data
+    const sensitiveInputs = document.querySelectorAll('input[type="password"], input[data-sensitive="true"]');
+    Array.from(sensitiveInputs).forEach((input) => {
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+    });
+    
+    // Clear sensitive data from localStorage
+    localStorage.removeItem('user_data')
+    localStorage.removeItem('temp_session')
+    
+    announceSecurityEvent('Sensitive data cleared')
+  }
+  
+  // Handle security timeout
+  const handleSecurityTimeout = useCallback(() => {
+    if (!defaultConfig.accessibility.logoutOnInactivity || inactivityPaused.current) return;
+    
+    monitoring.security.trackOperation('securityTimeout', async () => {
+      try {
+        clearSensitiveData();
+        await refreshSecurity();
+        announceSecurityEvent('Session timed out due to inactivity', 'assertive');
+        resetSecurityFocus();
+      } catch (error) {
+        console.error('Security timeout handling failed:', error);
+        announceSecurityEvent('Security timeout error occurred', 'assertive');
+      }
+    });
+  }, [
+    defaultConfig.accessibility.logoutOnInactivity,
+    clearSensitiveData,
+    refreshSecurity,
+    announceSecurityEvent,
+    resetSecurityFocus,
+    monitoring.security
+  ]);
+  
+  // Reset focus after security events
+  const resetSecurityFocus = () => {
+    if (!defaultConfig.accessibility.focusResetOnNavigation) return
+    
+    const loginForm = document.querySelector('#login-form')
+    const mainContent = document.querySelector('main')
+    
+    if (loginForm) {
+      const firstInput = loginForm.querySelector('input')
+      if (firstInput) {
+        firstInput.focus()
+      }
+    } else if (mainContent) {
+      mainContent.setAttribute('tabindex', '-1')
+      mainContent.focus()
+      mainContent.removeAttribute('tabindex')
+    }
+  }
+  
+  // Optimized security refresh
+  const refreshSecurity = useCallback(async () => {
+    await monitoring.security.trackOperation('refreshSecurity', async () => {
+      const userId = localStorage.getItem('user_id');
+      if (!userId) return;
+
+      try {
+        const [csrfToken, sessionToken] = await Promise.all([
+          getSecurityToken('csrf', userId),
+          getSecurityToken('session', userId)
+        ]);
+
+        if (csrfToken && sessionToken) {
+          localStorage.setItem('csrf_token', csrfToken);
+          localStorage.setItem('session_id', sessionToken);
+        }
+      } catch (error) {
+        console.error('Failed to refresh security tokens:', error);
+      }
+    });
+  }, [getSecurityToken, monitoring.security]);
+
+  // Start secure session
+  const startSecureSession = useCallback(() => {
+    setIsSecureInputFocused(true)
+    announceSecurityEvent('Entering secure input mode')
+    
+    // Enhance security for sensitive operations
+    if (defaultConfig.accessibility.autoRefreshTokens) {
+      refreshSecurity()
+    }
+  }, [defaultConfig.accessibility.autoRefreshTokens, announceSecurityEvent, refreshSecurity])
+  
+  // End secure session
+  const endSecureSession = useCallback(() => {
+    setIsSecureInputFocused(false)
+    announceSecurityEvent('Exiting secure input mode')
+    clearSensitiveData()
+  }, [announceSecurityEvent])
+  
+  // Optimized inactivity monitoring with debounce
+  const debouncedInactivityCheck = useDebounce((timestamp: number) => {
+    monitoring.security.trackOperation('inactivityCheck', async () => {
+    
+    if (inactivityTimer.current) {
+      window.clearTimeout(inactivityTimer.current);
+    }
+    
+    if (!inactivityPaused.current && defaultConfig.accessibility.logoutOnInactivity) {
+      // Calculate remaining time based on last activity
+      const remainingTime = Math.max(
+        0,
+        defaultConfig.accessibility.inactivityTimeout - (Date.now() - timestamp)
+      );
+
+      inactivityTimer.current = window.setTimeout(
+        handleSecurityTimeout,
+        remainingTime
+      );
+    }
+    
+    });
+  }, [monitoring.security, handleSecurityTimeout]); // Debounce for 1 second
+
+  // Monitor inactivity with timestamp tracking
+  const monitorInactivity = useCallback(() => {
+    const timestamp = Date.now();
+    debouncedInactivityCheck(timestamp);
+  }, [debouncedInactivityCheck]);
+  
+  // Optimized pause inactivity monitoring
+  const pauseInactivityMonitoring = useCallback(() => {
+    performance.startOperation('pauseInactivity');
+    
+    inactivityPaused.current = true;
+    if (inactivityTimer.current) {
+      window.clearTimeout(inactivityTimer.current);
+    }
+    
+    if (defaultConfig.accessibility.sessionAlerts) {
+      queueSecurityUpdate(async () => {
+        announceSecurityEvent('Security timeout paused');
+      });
+    }
+    
+    performance.endOperation();
+  }, []);
+  
+  // Optimized resume inactivity monitoring
+  const resumeInactivityMonitoring = useCallback(() => {
+    void monitoring.security.trackOperation('resumeInactivity', async () => {
+      inactivityPaused.current = false;
+      monitorInactivity();
+      
+      if (defaultConfig.accessibility.sessionAlerts) {
+        await queueSecurityUpdate(async () => {
+          announceSecurityEvent('Security timeout resumed');
+        });
+      }
+    });
+  }, [monitorInactivity]);
+
+  // Set up optimized security maintenance
+  useEffect(() => {
+    let isRunningMaintenance = false;
+    const performMaintenance = async () => {
+      if (isRunningMaintenance) return;
+      
+      await monitoring.trackOperation('securityMaintenance', async () => {
+        try {
+          isRunningMaintenance = true;
+          
+          // Session cleanup
+          if (typeof services.sessionManager.cleanup === 'function') {
+            services.sessionManager.cleanup();
+          }
+          
+          // CSRF cleanup
+          services.csrf.clearExpiredTokens();
+          
+          // Security middleware cleanup
+          if (typeof services.securityMiddleware.cleanup === 'function') {
+            services.securityMiddleware.cleanup();
+          }
+          
+          // Token cache cleanup
+          services.tokenCache.cleanup();
+        } finally {
+          isRunningMaintenance = false;
+        }
+      });
+    };
+
+    const maintenanceInterval = setInterval(
+      performMaintenance,
+      performanceConfig.cleanupInterval || DEFAULT_PERFORMANCE_CONFIG.cleanupInterval
+    );
+
+    // Initial maintenance
+    void performMaintenance();
+
+    return () => {
+      clearInterval(maintenanceInterval);
+      // Final cleanup
+      void performMaintenance();
+    };
+  }, [services, monitoring, performanceConfig.cleanupInterval]);
+
+    // Set up device fingerprinting
+  useEffect(() => {
+    try {
+      // Generate browser fingerprint
+      const components = [
+        window.navigator.userAgent,
+        window.navigator.language,
+        window.screen.colorDepth,
+        window.screen.width,
+        window.screen.height,
+        new Date().getTimezoneOffset()
+      ].join('|')
+      
+      // Encrypt the fingerprint for storage
+      const fingerprint = encryptData(components)
+      localStorage.setItem('device_fingerprint', fingerprint)
+    } catch (error) {
+      console.error('Failed to generate device fingerprint:', error)
+    }
+  }, [])
+
+  // Set up CSP and security headers
+  useEffect(() => {
+    // Generate a random nonce
+    const nonce = crypto.getRandomValues(new Uint8Array(16))
+      .reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '')
+    
+    const meta = document.createElement('meta')
+    meta.httpEquiv = 'Content-Security-Policy'
+    meta.content = `
+      default-src 'self';
+      script-src 'self' 'nonce-${nonce}' 'strict-dynamic';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: https:;
+      font-src 'self';
+      object-src 'none';
+      base-uri 'self';
+      form-action 'self';
+      frame-ancestors 'none';
+      block-all-mixed-content;
+      upgrade-insecure-requests;
+    `.replace(/\s+/g, ' ').trim()
+    document.head.appendChild(meta)
+    
+    return () => {
+      document.head.removeChild(meta)
+    }
+  }, [csrf])
+
+  // Initialize security headers
+  useEffect(() => {
+    // Add security headers to all API requests
+    const originalFetch = window.fetch
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      const securedRequest = await securityMiddleware.preProcessRequest(request)
+      
+      try {
+        const response = await originalFetch(securedRequest)
+        return await securityMiddleware.preProcessResponse(response)
+      } catch (error) {
+        console.error('Security middleware error:', error)
+        throw error
+      }
+    }
+
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [securityMiddleware])
+
+  // Batched security updates
+  const processBatchedUpdates = useCallback(async () => {
+    return monitoring.security.trackOperation('processBatchedUpdates', async () => {
+      const updates = Array.from(pendingUpdates.current);
+      pendingUpdates.current.clear();
+
+      try {
+        await Promise.all(updates.map(update => update()));
+      } catch (error) {
+        console.error('Error processing security updates:', error);
+      }
+    });
+  }, []);
+
+  // Add update to batch
+  const queueSecurityUpdate = useCallback((update: () => Promise<void>) => {
+    pendingUpdates.current.add(update);
+    
+    if (batchTimeout.current) {
+      window.clearTimeout(batchTimeout.current);
+    }
+    
+    batchTimeout.current = window.setTimeout(processBatchedUpdates, 100);
+  }, [processBatchedUpdates]);
+
+  // Optimized security token management
+  const getSecurityToken = useCallback(async (type: string, userId: string): Promise<string | null> => {
+    const cachedToken = tokenCache.get(`${type}_${userId}`);
+    if (cachedToken) return cachedToken;
+
+    return monitoring.security.trackOperation('generateSecurityToken', async () => {
+      let newToken: string | null = null;
+      
+      try {
+        switch (type) {
+          case 'csrf':
+            newToken = csrf.generateToken(userId);
+            break;
+          case 'session':
+            const fingerprint = localStorage.getItem('device_fingerprint');
+            if (fingerprint) {
+              const session = sessionManager.createSession(userId, fingerprint);
+              newToken = session.id;
+            }
+            break;
+        }
+
+        if (newToken) {
+          tokenCache.set(`${type}_${userId}`, newToken, type);
+        }
+      } catch (error) {
+        console.error(`Failed to generate ${type} token:`, error);
+        return null;
+      }
+
+      return newToken;
+    });
+  }, [monitoring.security, csrf, sessionManager, tokenCache]);
+
+
+
+  // Event listener management with monitoring and cleanup
+  useEffect(() => {
+    if (!defaultConfig.accessibility.logoutOnInactivity) return;
+
+    const cleanupQueue = new Set<() => void>();
+    const setupListeners = async () => {
+      return monitoring.security.trackOperation('setupEventListeners', async () => {
+        // Map of events to their throttled/debounced handlers
+        const eventHandlers = new Map([
+          ['keydown', monitorInactivity],
+          ['mousedown', monitorInactivity],
+          ['mousemove', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
+          ['wheel', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
+          ['touchstart', monitorInactivity],
+          ['touchmove', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
+          ['focus', monitorInactivity]
+        ]);
+
+        // Add event listeners one by one to avoid blocking the main thread
+        for (const [event, handler] of eventHandlers.entries()) {
+          window.addEventListener(event, handler, { passive: true });
+          cleanupQueue.add(() => window.removeEventListener(event, handler));
+        }
+
+        monitorInactivity(); // Start initial timer
+
+        if (inactivityTimer.current) {
+          cleanupQueue.add(() => window.clearTimeout(inactivityTimer.current));
+        }
+        
+        if (batchTimeout.current) {
+          cleanupQueue.add(() => window.clearTimeout(batchTimeout.current));
+        }
+
+        return () => {
+          // Execute all cleanup functions in reverse order
+          Array.from(cleanupQueue).reverse().forEach(cleanup => cleanup());
+          cleanupQueue.clear();
+        };
+      });
+    };
+
+    // Set up listeners and store cleanup function
+    let cleanup: (() => void) | undefined;
+    setupListeners().then(cleanupFn => {
+      cleanup = cleanupFn;
+    });
+
+    // Return cleanup function that will be called when component unmounts
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce]);
+
+
+}
+
+export const useSecurity = () => {
+  const context = useContext(SecurityContext);
+  if (!context) {
+    throw new Error('useSecurity must be used within a SecurityProvider');
+  }
+  return context;
+}
+    csrf,
+    xss,
+    refreshSecurity,
+    // Accessibility-enhanced security features
+    announceSecurityEvent,
+    clearSensitiveData,
+    handleSecurityTimeout,
+    resetSecurityFocus,
+    isSecureInputFocused,
+    startSecureSession,
+    endSecureSession,
+    monitorInactivity,
+    pauseInactivityMonitoring,
+    resumeInactivityMonitoring
+  }
+
+  return (
+    <SecurityContext.Provider value={value}>
+      {children}
+    </SecurityContext.Provider>
+  )
+}
+
+// Hook to consume security context
+export function useSecurity(): SecurityContextType {
+  const context = useContext(SecurityContext);
+  if (context === undefined) {
+    throw new Error('useSecurity must be used within a SecurityProvider');
+  }
+  return context;
+}
+
+// Hook for monitoring only
+export function useSecurityMonitoring() {
+  const { security } = useMonitoring();
+  if (!security) {
+    throw new Error('useSecurityMonitoring must be used within MonitoringProvider');
+  }
+  return security;
+}
