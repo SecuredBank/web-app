@@ -358,23 +358,29 @@ export function SecurityProvider({
         // Queue maintenance tasks
         const tasks = [];
         
-        // Session cleanup if available
-        if (typeof sessionManager.cleanup === 'function') {
-          tasks.push(queueOperation(() => sessionManager.cleanup()));
-        }
-        
-        // CSRF token cleanup
-        tasks.push(queueOperation(() => csrf.clearExpiredTokens()));
-        
-        // Security middleware cleanup if available
-        if (typeof securityMiddleware.cleanup === 'function') {
-          tasks.push(queueOperation(() => securityMiddleware.cleanup()));
-        }
-        
-        // Token cache cleanup
-        tasks.push(queueOperation(async () => {
-          services.tokenCache.cleanup();
-        }));
+        // Queue cleanup tasks as async operations
+        tasks.push(
+          queueOperation(async () => {
+            // Wrap synchronous operations in promises
+            await Promise.resolve().then(() => {
+              // Session cleanup
+              if (sessionManager.cleanup && typeof sessionManager.cleanup === 'function') {
+                sessionManager.cleanup();
+              }
+              
+              // CSRF cleanup
+              csrf.clearExpiredTokens();
+              
+              // Security middleware cleanup
+              if (securityMiddleware.cleanup && typeof securityMiddleware.cleanup === 'function') {
+                securityMiddleware.cleanup();
+              }
+              
+              // Token cache cleanup
+              services.tokenCache.cleanup();
+            });
+          })
+        );
         
         await Promise.all(tasks);
         metrics.endOperation();
