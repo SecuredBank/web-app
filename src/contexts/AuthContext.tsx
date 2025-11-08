@@ -8,9 +8,11 @@ import {
   validateTokenExpiry,
   encryptData,
   decryptData,
+  getDeviceFingerprint,
 } from '../utils/securityUtils'
 import toast from 'react-hot-toast'
 import { useSecurity } from './SecurityContext'
+import { SecurityEvent, SecurityEventType } from '../types/security'
 
 interface AuthState {
   user: User | null
@@ -20,6 +22,10 @@ interface AuthState {
   error: string | null
   sessionExpiresAt: Date | null
   lastLoginAt: Date | null
+  deviceFingerprint: string | null
+  failedAttempts: number
+  lastAttemptAt: Date | null
+  securityScore: number
 }
 
 type AuthAction =

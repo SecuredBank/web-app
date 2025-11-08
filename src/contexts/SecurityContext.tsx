@@ -8,28 +8,13 @@ import { useA11y } from './A11yContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { useMonitoring } from '../hooks/useMonitoring';
 
-// Types
-interface SecurityEvent {
-  type: SecurityEventType;
-  timestamp: number;
-  data?: any;
-}
-
-type SecurityEventType =
-  | 'SESSION_EXPIRED'
-  | 'TOKEN_REFRESH'
-  | 'SECURITY_VIOLATION'
-  | 'ACCESS_DENIED'
-  | 'AUTH_SUCCESS'
-  | 'AUTH_FAILURE';
-
-interface SecurityMetrics {
-  events: SecurityEvent[];
-  violations: number;
-  successfulAuths: number;
-  failedAuths: number;
-  averageResponseTime: number;
-}
+import { 
+  SecurityEvent,
+  SecurityEventType,
+  SecurityMetrics,
+  SecurityMonitoringConfig,
+  SecurityHealth 
+} from '../types/security';
 
 interface PerformanceConfig {
   tokenCacheTTL: number;
