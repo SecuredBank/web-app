@@ -1,4 +1,5 @@
-import { API_BASE_URL, API_TIMEOUT } from '@constants'
+import { API_BASE_URL, API_TIMEOUT } from '../constants'
+import { createSecureHeaders, validateTokenExpiry } from './securityUtils'
 
 // API Response types
 export interface ApiResponse<T> {
@@ -8,10 +9,17 @@ export interface ApiResponse<T> {
   timestamp: string
 }
 
-export interface ApiError {
-  message: string
+// Remove the interface and just use the class
+export class ApiError extends Error {
   code: string
   details?: any
+
+  constructor(message: string, code: string, details?: any) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+    this.details = details
+  }
 }
 
 export interface RequestConfig {
@@ -30,9 +38,14 @@ class ApiClient {
   constructor(baseURL: string = API_BASE_URL, timeout: number = API_TIMEOUT) {
     this.baseURL = baseURL
     this.defaultTimeout = timeout
-    this.defaultHeaders = {
-      'Content-Type': 'application/json',
-    }
+
+    // Convert Headers to plain object
+    const headers = createSecureHeaders()
+    const headerObj: Record<string, string> = {}
+    headers.forEach((value, key) => {
+      headerObj[key] = value
+    })
+    this.defaultHeaders = headerObj
   }
 
   // Set authorization token
@@ -46,7 +59,7 @@ class ApiClient {
   }
 
   // Make HTTP request
-  private async request<T>(
+  async request<T>(
     endpoint: string,
     config: RequestConfig = {}
   ): Promise<ApiResponse<T>> {
@@ -77,7 +90,8 @@ class ApiClient {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
         throw new ApiError(
-          errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+          errorData.message ||
+            `HTTP ${response.status}: ${response.statusText}`,
           errorData.code || 'HTTP_ERROR',
           errorData
         )
@@ -87,45 +101,62 @@ class ApiClient {
       return data
     } catch (error) {
       clearTimeout(timeoutId)
-      
+
       if (error instanceof ApiError) {
         throw error
       }
 
-      if (error.name === 'AbortError') {
-        throw new ApiError('Request timeout', 'TIMEOUT_ERROR')
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new ApiError('Request timeout', 'TIMEOUT_ERROR')
+        }
+        throw new ApiError(error.message, 'NETWORK_ERROR')
       }
 
-      throw new ApiError(
-        error.message || 'Network error',
-        'NETWORK_ERROR',
-        error
-      )
+      throw new ApiError('Network error', 'NETWORK_ERROR', error)
     }
   }
 
   // GET request
-  async get<T>(endpoint: string, config?: Omit<RequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
+  async get<T>(
+    endpoint: string,
+    config?: Omit<RequestConfig, 'method' | 'body'>
+  ): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { ...config, method: 'GET' })
   }
 
   // POST request
-  async post<T>(endpoint: string, body?: any, config?: Omit<RequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
+  async post<T>(
+    endpoint: string,
+    body?: any,
+    config?: Omit<RequestConfig, 'method' | 'body'>
+  ): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { ...config, method: 'POST', body })
   }
 
   // PUT request
-  async put<T>(endpoint: string, body?: any, config?: Omit<RequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
+  async put<T>(
+    endpoint: string,
+    body?: any,
+    config?: Omit<RequestConfig, 'method' | 'body'>
+  ): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { ...config, method: 'PUT', body })
   }
 
   // PATCH request
-  async patch<T>(endpoint: string, body?: any, config?: Omit<RequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
+  async patch<T>(
+    endpoint: string,
+    body?: any,
+    config?: Omit<RequestConfig, 'method' | 'body'>
+  ): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { ...config, method: 'PATCH', body })
   }
 
   // DELETE request
-  async delete<T>(endpoint: string, config?: Omit<RequestConfig, 'method' | 'body'>): Promise<ApiResponse<T>> {
+  async delete<T>(
+    endpoint: string,
+    config?: Omit<RequestConfig, 'method' | 'body'>
+  ): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { ...config, method: 'DELETE' })
   }
 }
@@ -155,7 +186,7 @@ export const endpoints = {
     refresh: '/auth/refresh',
     profile: '/auth/profile',
   },
-  
+
   // Users
   users: {
     list: '/users',
@@ -164,7 +195,7 @@ export const endpoints = {
     update: (id: string) => `/users/${id}`,
     delete: (id: string) => `/users/${id}`,
   },
-  
+
   // Security Alerts
   alerts: {
     list: '/alerts',
@@ -174,7 +205,7 @@ export const endpoints = {
     delete: (id: string) => `/alerts/${id}`,
     resolve: (id: string) => `/alerts/${id}/resolve`,
   },
-  
+
   // Reports
   reports: {
     list: '/reports',
@@ -182,7 +213,7 @@ export const endpoints = {
     get: (id: string) => `/reports/${id}`,
     download: (id: string) => `/reports/${id}/download`,
   },
-  
+
   // Dashboard
   dashboard: {
     stats: '/dashboard/stats',
@@ -196,11 +227,11 @@ export const handleApiError = (error: any): string => {
   if (error instanceof ApiError) {
     return error.message
   }
-  
+
   if (error.response?.data?.message) {
     return error.response.data.message
   }
-  
+
   return 'An unexpected error occurred'
 }
 
@@ -211,16 +242,19 @@ export const isApiError = (error: any): error is ApiError => {
 // Request interceptor for adding auth token
 export const setupAuthInterceptor = (getToken: () => string | null) => {
   const originalRequest = apiClient.request.bind(apiClient)
-  
-  apiClient.request = async function<T>(endpoint: string, config: RequestConfig = {}) {
+
+  apiClient.request = async function <T>(
+    endpoint: string,
+    config: RequestConfig = {}
+  ) {
     const token = getToken()
     if (token) {
       config.headers = {
         ...config.headers,
-        'Authorization': `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
       }
     }
-    
+
     return originalRequest<T>(endpoint, config)
   }
 }

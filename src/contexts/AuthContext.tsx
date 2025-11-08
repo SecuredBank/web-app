@@ -2,6 +2,15 @@ import React, { createContext, useContext, useReducer, useEffect } from 'react'
 import { User, LoginCredentials, LoginResponse } from '../types/auth'
 import { useApi } from '../hooks/useApi'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { 
+  handleLoginAttempt,
+  validateSessionTimeout,
+  validateTokenExpiry,
+  encryptData,
+  decryptData,
+  createSecureHeaders,
+  validatePasswordStrength
+} from '../utils/securityUtils'
 import toast from 'react-hot-toast'
 
 interface AuthState {
