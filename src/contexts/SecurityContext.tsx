@@ -9,6 +9,32 @@ import { useDebounce } from '../hooks/useDebounce'
 import { usePerformanceMonitoring } from '../hooks/usePerformanceMonitoring'
 import { SecurityTokenCache } from '../utils/SecurityTokenCache'
 
+interface CachedOperation<T> {
+  result: T
+  timestamp: number
+  expiry: number
+}
+
+interface PerformanceConfig {
+  tokenCacheTTL: number
+  operationCacheTTL: number
+  batchDelay: number
+  highFrequencyDebounce: number
+  maxBatchSize: number
+  cleanupInterval: number
+  metricsEnabled: boolean
+}
+
+const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
+  tokenCacheTTL: 300000, // 5 minutes
+  operationCacheTTL: 60000, // 1 minute
+  batchDelay: 100, // 100ms
+  highFrequencyDebounce: 250, // 250ms
+  maxBatchSize: 50,
+  cleanupInterval: 300000, // 5 minutes
+  metricsEnabled: process.env.NODE_ENV === 'development'
+}
+
 interface SecurityConfig {
   xss: { enabled: boolean }
   csrf: {
@@ -104,12 +130,50 @@ const defaultConfig: SecurityConfig = {
   }
 }
 
-export function SecurityProvider({ children }: { children: React.ReactNode }) {
-  // Initialize security features
-  const securityMiddleware = useRef(new SecurityMiddleware(defaultConfig)).current
-  const sessionManager = useRef(new SessionManager()).current
-  const csrf = useRef(new CSRFProtection()).current
-  const xss = useRef(new XSSProtection()).current
+export function SecurityProvider({ 
+  children,
+  performanceConfig = DEFAULT_PERFORMANCE_CONFIG 
+}: { 
+  children: React.ReactNode
+  performanceConfig?: Partial<PerformanceConfig>
+}) {
+  // Initialize security features with performance monitoring
+  const performance = usePerformanceMonitoring('SecurityProvider', {
+    threshold: 100,
+    enableMemoryMetrics: performanceConfig.metricsEnabled,
+    onThresholdExceeded: (metrics) => {
+      console.warn('[Security] Performance threshold exceeded:', metrics)
+    }
+  })
+
+  // Initialize core security features with performance tracking
+  const securityMiddleware = useMemo(() => {
+    performance.startOperation('initSecurityMiddleware')
+    const middleware = new SecurityMiddleware(defaultConfig)
+    performance.endOperation()
+    return middleware
+  }, [])
+
+  const sessionManager = useMemo(() => {
+    performance.startOperation('initSessionManager')
+    const manager = new SessionManager()
+    performance.endOperation()
+    return manager
+  }, [])
+
+  const csrf = useMemo(() => {
+    performance.startOperation('initCSRF')
+    const csrfProtection = new CSRFProtection()
+    performance.endOperation()
+    return csrfProtection
+  }, [])
+
+  const xss = useMemo(() => {
+    performance.startOperation('initXSS')
+    const xssProtection = new XSSProtection()
+    performance.endOperation()
+    return xssProtection
+  }, [])
   
   // Initialize performance monitoring
   const performance = usePerformanceMonitoring('SecurityContext', {
