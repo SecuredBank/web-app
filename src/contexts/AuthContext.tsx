@@ -10,6 +10,7 @@ import {
   decryptData,
 } from '../utils/securityUtils'
 import toast from 'react-hot-toast'
+import { useSecurity } from './SecurityContext'
 
 interface AuthState {
   user: User | null
@@ -129,24 +130,36 @@ const mockUser: User = {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState)
   const [storedToken, setStoredToken] = useLocalStorage<string>('auth_token', '')
+  const { services, startSecureSession, processSecurityEvent } = useSecurity()
 
   // Check for existing session on mount
   useEffect(() => {
     const initializeAuth = async () => {
       if (!storedToken) return
 
-      // Validate token expiry
-      if (!validateTokenExpiry(storedToken)) {
-        dispatch({ type: 'SESSION_EXPIRED' })
-        return
-      }
-
       try {
         dispatch({ type: 'AUTH_START' })
         
-        // Decrypt stored user data
+        // Validate session with security service
+        const isValid = await services.sessionManager.validateSession(storedToken)
+        if (!isValid) {
+          processSecurityEvent({
+            type: 'SESSION_EXPIRED',
+            timestamp: Date.now()
+          })
+          dispatch({ type: 'SESSION_EXPIRED' })
+          return
+        }
+
+        // Start secure session
+        startSecureSession()
+        
+        // Decrypt stored user data with XSS protection
         const encryptedUser = localStorage.getItem('user')
         if (!encryptedUser) throw new Error('No user data found')
+        
+        // Apply XSS protection when decrypting user data
+        const decryptedUser = services.xss.sanitize(decryptData(encryptedUser))
         
         const decryptedUser = decryptData(encryptedUser)
         if (!decryptedUser) throw new Error('Invalid user data')
@@ -172,13 +185,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initializeAuth()
   }, [storedToken])
 
-  // Session validation effect
+  // Session validation effect with security monitoring
   useEffect(() => {
     if (!state.isAuthenticated) return
 
     const validateCurrentSession = async () => {
-      const isValid = await validateSession()
-      if (!isValid) {
+      try {
+        const isValid = await services.sessionManager.validateSession(state.token || '')
+        if (!isValid) {
+          processSecurityEvent({
+            type: 'SESSION_EXPIRED',
+            timestamp: Date.now()
+          })
+          dispatch({ type: 'SESSION_EXPIRED' })
+          return
+        }
+
+        // Refresh security tokens if needed
+        if (state.sessionExpiresAt && state.sessionExpiresAt.getTime() - Date.now() < TOKEN_REFRESH_INTERVAL) {
+          const newToken = await services.sessionManager.refreshSession(state.token || '')
+          if (newToken) {
+            const expiresAt = new Date(Date.now() + SESSION_DURATION)
+            dispatch({
+              type: 'REFRESH_TOKEN',
+              payload: { token: newToken, expiresAt }
+            })
+            setStoredToken(newToken)
+          }
+        }
+      } catch (error) {
+        console.error('Session validation failed:', error)
         dispatch({ type: 'SESSION_EXPIRED' })
       }
     }
@@ -231,35 +267,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (credentials: LoginForm) => {
     try {
       dispatch({ type: 'AUTH_START' })
+      
+      // Start secure session for login
+      startSecureSession()
 
-      // Validate input using Zod schema
+      // Validate and sanitize input
       const validationResult = await loginSchema.safeParseAsync(credentials)
       if (!validationResult.success) {
         throw new Error(validationResult.error.errors[0].message)
       }
 
+      // Apply XSS protection to credentials
+      const sanitizedCredentials = {
+        email: services.xss.sanitize(credentials.email),
+        password: credentials.password, // Don't sanitize password
+        rememberMe: credentials.rememberMe
+      }
+
       // Simulate API call in development
       await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // In development, use mock authentication
+      // In development, use mock authentication with security
       if (process.env.NODE_ENV === 'development') {
-        if (credentials.email === 'admin@securedbank.com' && credentials.password === 'admin123') {
-          const token = 'mock-token'
+        if (sanitizedCredentials.email === 'admin@securedbank.com' && sanitizedCredentials.password === 'admin123') {
+          // Generate secure session token
+          const sessionToken = await services.sessionManager.createSession('1', 'development')
           const expiresAt = new Date(Date.now() + SESSION_DURATION)
           const user = { ...mockUser, lastLogin: new Date() }
           
-          // Encrypt user data before storing
-          const encryptedUser = encryptData(JSON.stringify(user))
+          // Generate CSRF token
+          const csrfToken = await services.csrf.generateToken('1')
+          
+          // Apply security measures and encrypt user data
+          const sanitizedUser = services.xss.sanitize(JSON.stringify(user))
+          const encryptedUser = encryptData(sanitizedUser)
           localStorage.setItem('user', encryptedUser)
+          localStorage.setItem('csrf_token', csrfToken)
+          
+          // Log successful authentication
+          processSecurityEvent({
+            type: 'AUTH_SUCCESS',
+            timestamp: Date.now(),
+            data: { userId: '1' }
+          })
           
           dispatch({ 
             type: 'AUTH_SUCCESS',
-            payload: { user, token, expiresAt }
+            payload: { user, token: sessionToken, expiresAt }
           })
           
-          setStoredToken(token)
+          setStoredToken(sessionToken)
           
-          if (credentials.rememberMe) {
+          if (sanitizedCredentials.rememberMe) {
             localStorage.setItem('remember_me', 'true')
           }
 
@@ -279,12 +338,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const logout = () => {
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('user')
-    localStorage.removeItem('remember_me')
-    dispatch({ type: 'LOGOUT' })
-    toast.success('Logged out successfully')
+  const logout = async () => {
+    try {
+      // End secure session
+      endSecureSession()
+
+      // Clear session in security service
+      if (state.token) {
+        await services.sessionManager.endSession(state.token)
+      }
+
+      // Clear security tokens
+      services.csrf.clearTokens()
+
+      // Clear sensitive data
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('user')
+      localStorage.removeItem('remember_me')
+      localStorage.removeItem('csrf_token')
+      
+      // Log security event
+      processSecurityEvent({
+        type: 'AUTH_SUCCESS',
+        timestamp: Date.now(),
+        data: { action: 'logout' }
+      })
+
+      dispatch({ type: 'LOGOUT' })
+      toast.success('Logged out successfully')
+    } catch (error) {
+      console.error('Logout error:', error)
+      toast.error('Error during logout')
+    }
   }
 
   const clearError = () => {
