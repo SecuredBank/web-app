@@ -436,17 +436,16 @@ export function SecurityProvider({
 
   // Batched security updates
   const processBatchedUpdates = useCallback(async () => {
-    performance.startOperation('processBatchedUpdates');
-    const updates = Array.from(pendingUpdates.current);
-    pendingUpdates.current.clear();
+    return monitoring.security.trackOperation('processBatchedUpdates', async () => {
+      const updates = Array.from(pendingUpdates.current);
+      pendingUpdates.current.clear();
 
-    try {
-      await Promise.all(updates.map(update => update()));
-    } catch (error) {
-      console.error('Error processing security updates:', error);
-    }
-
-    performance.endOperation();
+      try {
+        await Promise.all(updates.map(update => update()));
+      } catch (error) {
+        console.error('Error processing security updates:', error);
+      }
+    });
   }, []);
 
   // Add update to batch
