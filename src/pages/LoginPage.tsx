@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Shield, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { useAuth } from '@contexts/AuthContext'
+import { useSecurity } from '@contexts/SecurityContext'
 import { LoginForm } from '@types'
 import { cn } from '@utils/cn'
 
@@ -17,6 +18,7 @@ const loginSchema = z.object({
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const { login, isAuthenticated, isLoading, error } = useAuth()
+  const { services, startSecureSession, processSecurityEvent } = useSecurity()
   const location = useLocation()
 
   const {
@@ -39,7 +41,50 @@ export default function LoginPage() {
   }
 
   const onSubmit = async (data: LoginForm) => {
-    await login(data)
+    try {
+      // Start secure session for login
+      startSecureSession()
+
+      // Apply XSS protection to credentials
+      const sanitizedData = {
+        email: services.xss.sanitize(data.email),
+        password: data.password, // Don't sanitize password
+        rememberMe: data.rememberMe
+      }
+
+      // Generate device fingerprint for session
+      const components = [
+        window.navigator.userAgent,
+        window.navigator.language,
+        window.screen.colorDepth,
+        window.screen.width,
+        window.screen.height,
+        new Date().getTimezoneOffset()
+      ].join('|')
+
+      // Store device fingerprint for session validation
+      localStorage.setItem('device_fingerprint', components)
+
+      // Attempt login
+      await login(sanitizedData)
+
+      // Log successful login attempt
+      processSecurityEvent({
+        type: 'AUTH_SUCCESS',
+        timestamp: Date.now(),
+        data: { email: sanitizedData.email }
+      })
+    } catch (error) {
+      // Log failed login attempt
+      processSecurityEvent({
+        type: 'AUTH_FAILURE',
+        timestamp: Date.now(),
+        data: { email: data.email, error }
+      })
+
+      // Re-throw to let AuthContext handle it
+      throw error;
+    }
   }
 
   return (

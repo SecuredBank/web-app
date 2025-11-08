@@ -12,95 +12,309 @@ import {
 } from 'lucide-react'
 import { SecurityAlert, AlertSeverity, AlertType, AlertStatus } from '@types'
 import { cn } from '@utils/cn'
+import { useSecurity } from '@contexts/SecurityContext'
+import { Card } from '@components/ui/Card'
+import { Badge } from '@components/ui/Badge'
+import { Button } from '@components/ui/Button'
+import { Input } from '@components/ui/Input'
+import { Select } from '@components/ui/Select'
+import { Table } from '@components/ui/Table'
 
-// Mock data for security alerts
-const mockAlerts: SecurityAlert[] = [
-  {
-    id: '1',
-    type: 'login_anomaly',
-    severity: 'high',
-    title: 'Multiple Failed Login Attempts',
-    description: 'Unusual login pattern detected from IP 192.168.1.100 with 15 failed attempts in 5 minutes',
-    timestamp: new Date(Date.now() - 1000 * 60 * 15),
-    source: 'Authentication System',
-    status: 'open',
-    assignedTo: 'John Doe',
-    metadata: {
-      ip: '192.168.1.100',
-      attempts: 15,
-      timeWindow: '5 minutes',
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-  },
-  {
-    id: '2',
-    type: 'suspicious_transaction',
-    severity: 'medium',
-    title: 'Large Transaction Detected',
-    description: 'Transaction of $50,000 flagged for review - exceeds normal user patterns',
-    timestamp: new Date(Date.now() - 1000 * 60 * 30),
-    source: 'Transaction Monitor',
-    status: 'investigating',
-    assignedTo: 'Jane Smith',
-    metadata: {
-      amount: 50000,
-      currency: 'USD',
-      account: 'ACC-123456',
-      recipient: 'Unknown Entity'
-    }
-  },
-  {
-    id: '3',
-    type: 'malware_detected',
-    severity: 'critical',
-    title: 'Malware Signature Detected',
-    description: 'Known malware pattern identified in network traffic from external source',
-    timestamp: new Date(Date.now() - 1000 * 60 * 45),
-    source: 'Network Security',
-    status: 'open',
-    metadata: {
-      malwareType: 'Trojan',
-      signature: 'MAL-2024-001',
-      affectedSystems: ['Web Server', 'Database Server']
-    }
-  },
-  {
-    id: '4',
-    type: 'data_breach',
-    severity: 'critical',
-    title: 'Potential Data Breach Attempt',
-    description: 'Unauthorized access attempt to customer database detected',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60),
-    source: 'Database Monitor',
-    status: 'investigating',
-    assignedTo: 'Mike Johnson',
-    metadata: {
-      database: 'CustomerDB',
-      accessType: 'SQL Injection',
-      affectedRecords: 0
-    }
-  },
-  {
-    id: '5',
-    type: 'phishing_attempt',
-    severity: 'medium',
-    title: 'Phishing Email Detected',
-    description: 'Suspicious email with malicious links sent to multiple employees',
-    timestamp: new Date(Date.now() - 1000 * 60 * 90),
-    source: 'Email Security',
-    status: 'resolved',
-    resolvedAt: new Date(Date.now() - 1000 * 60 * 30),
-    metadata: {
-      sender: 'fake@bank-security.com',
-      recipients: 25,
-      linksBlocked: 3
-    }
+interface SecurityMetric {
+  title: string
+  value: number
+  change: number
+  trend: 'up' | 'down'
+}
+
+const convertEventToAlert = (event: any): SecurityAlert => {
+  let severity: AlertSeverity = 'low'
+  let type: AlertType = 'info'
+  let status: AlertStatus = 'open'
+
+  switch (event.type) {
+    case 'AUTH_FAILURE':
+      severity = 'high'
+      type = 'login_anomaly'
+      break
+    case 'SECURITY_VIOLATION':
+      severity = 'critical'
+      type = 'security_breach'
+      break
+    case 'SESSION_EXPIRED':
+      severity = 'medium'
+      type = 'session_anomaly'
+      break
+    case 'ACCESS_DENIED':
+      severity = 'high'
+      type = 'access_violation'
+      break
+    default:
+      break
   }
-]
 
-const severityColors = {
-  low: 'bg-success-100 text-success-800 border-success-200',
-  medium: 'bg-warning-100 text-warning-800 border-warning-200',
+  return {
+    id: event.timestamp.toString(),
+    type,
+    severity,
+    title: event.type.replace('_', ' ').toLowerCase(),
+    description: `Security event: ${event.type} - ${JSON.stringify(event.data)}`,
+    timestamp: new Date(event.timestamp),
+    source: 'Security System',
+    status,
+    assignedTo: 'Security Team',
+    metadata: event.data || {},
+  }
+}
+
+export default function SecurityMonitoringPage() {
+  const { monitoring } = useSecurity()
+  const [alerts, setAlerts] = useState<SecurityAlert[]>([])
+  const [metrics, setMetrics] = useState<SecurityMetric[]>([])
+  const [filter, setFilter] = useState({
+    severity: 'all',
+    type: 'all',
+    status: 'all'
+  })
+  
+  // Update metrics and alerts when monitoring data changes
+  useEffect(() => {
+    const securityMetrics = monitoring.getMetrics()
+    
+    // Convert security events to alerts
+    const newAlerts = securityMetrics.events.map(convertEventToAlert)
+    setAlerts(newAlerts)
+    
+    // Calculate metrics
+    const failedLogins = securityMetrics.events.filter(e => e.type === 'AUTH_FAILURE').length
+    const securityViolations = securityMetrics.events.filter(e => e.type === 'SECURITY_VIOLATION').length
+    const accessDenials = securityMetrics.events.filter(e => e.type === 'ACCESS_DENIED').length
+    
+    setMetrics([
+      {
+        title: 'Failed Logins',
+        value: failedLogins,
+        change: failedLogins - securityMetrics.failedAuths,
+        trend: failedLogins > securityMetrics.failedAuths ? 'up' : 'down'
+      },
+      {
+        title: 'Security Violations',
+        value: securityViolations,
+        change: securityViolations - securityMetrics.violations,
+        trend: securityViolations > securityMetrics.violations ? 'up' : 'down'
+      },
+      {
+        title: 'Access Denials',
+        value: accessDenials,
+        change: accessDenials,
+        trend: accessDenials > 0 ? 'up' : 'down'
+      },
+      {
+        title: 'Response Time',
+        value: Math.round(securityMetrics.averageResponseTime),
+        change: 0,
+        trend: securityMetrics.averageResponseTime > 1000 ? 'up' : 'down'
+      }
+    ])
+  }, [monitoring])
+
+  // Filter alerts based on current filter settings
+  const filteredAlerts = alerts.filter(alert => {
+    if (filter.severity !== 'all' && alert.severity !== filter.severity) return false
+    if (filter.type !== 'all' && alert.type !== filter.type) return false
+    if (filter.status !== 'all' && alert.status !== filter.status) return false
+    return true
+  })
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Security Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {metrics.map((metric) => (
+          <Card key={metric.title} className="p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-sm text-gray-600">{metric.title}</h3>
+              <Activity className={cn(
+                "h-4 w-4",
+                metric.trend === 'up' ? 'text-red-500' : 'text-green-500'
+              )} />
+            </div>
+            <div className="mt-2 flex items-baseline">
+              <p className="text-2xl font-semibold">{metric.value}</p>
+              {metric.change !== 0 && (
+                <span className={cn(
+                  "ml-2 text-sm",
+                  metric.trend === 'up' ? 'text-red-500' : 'text-green-500'
+                )}>
+                  {metric.change > 0 ? '+' : ''}{metric.change}
+                </span>
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 items-center">
+        <div className="flex items-center space-x-2">
+          <Search className="h-4 w-4 text-gray-500" />
+          <Input 
+            type="text"
+            placeholder="Search alerts..."
+            className="w-64"
+          />
+        </div>
+        
+        <Select
+          value={filter.severity}
+          onValueChange={(value) => setFilter(prev => ({ ...prev, severity: value }))}
+          options={[
+            { value: 'all', label: 'All Severities' },
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+            { value: 'critical', label: 'Critical' }
+          ]}
+        />
+
+        <Select
+          value={filter.type}
+          onValueChange={(value) => setFilter(prev => ({ ...prev, type: value }))}
+          options={[
+            { value: 'all', label: 'All Types' },
+            { value: 'login_anomaly', label: 'Login Anomaly' },
+            { value: 'security_breach', label: 'Security Breach' },
+            { value: 'session_anomaly', label: 'Session Anomaly' },
+            { value: 'access_violation', label: 'Access Violation' }
+          ]}
+        />
+
+        <Select
+          value={filter.status}
+          onValueChange={(value) => setFilter(prev => ({ ...prev, status: value }))}
+          options={[
+            { value: 'all', label: 'All Statuses' },
+            { value: 'open', label: 'Open' },
+            { value: 'investigating', label: 'Investigating' },
+            { value: 'resolved', label: 'Resolved' }
+          ]}
+        />
+      </div>
+
+      {/* Alerts Table */}
+      <Table>
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Title</th>
+            <th>Source</th>
+            <th>Time</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredAlerts.map((alert) => (
+            <tr key={alert.id}>
+              <td>
+                <Badge variant={
+                  alert.severity === 'critical' ? 'destructive' :
+                  alert.severity === 'high' ? 'error' :
+                  alert.severity === 'medium' ? 'warning' :
+                  'default'
+                }>
+                  {alert.severity}
+                </Badge>
+              </td>
+              <td>
+                <div>
+                  <p className="font-medium">{alert.title}</p>
+                  <p className="text-sm text-gray-500">{alert.description}</p>
+                </div>
+              </td>
+              <td>{alert.source}</td>
+              <td>
+                <div className="flex items-center space-x-1">
+                  <Clock className="h-4 w-4 text-gray-500" />
+                  <span>{alert.timestamp.toLocaleString()}</span>
+                </div>
+              </td>
+              <td>
+                <Badge variant={
+                  alert.status === 'resolved' ? 'success' :
+                  alert.status === 'investigating' ? 'warning' :
+                  'default'
+                }>
+                  {alert.status}
+                </Badge>
+              </td>
+              <td>
+                <div className="flex items-center space-x-2">
+                  <Button size="sm" variant="outline">
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button size="sm" variant="outline">
+                    <AlertTriangle className="h-4 w-4" />
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  )
+}
+export default function SecurityMonitoringPage() {
+  const { monitoring } = useSecurity()
+  const [alerts, setAlerts] = useState<SecurityAlert[]>([])
+  const [metrics, setMetrics] = useState<SecurityMetric[]>([])
+  const [filter, setFilter] = useState({
+    severity: 'all',
+    type: 'all',
+    status: 'all'
+  })
+  
+  // Update metrics and alerts when monitoring data changes
+  useEffect(() => {
+    const securityMetrics = monitoring.getMetrics()
+    
+    // Convert security events to alerts
+    const newAlerts = securityMetrics.events.map(convertEventToAlert)
+    setAlerts(newAlerts)
+    
+    // Calculate metrics
+    const failedLogins = securityMetrics.events.filter(e => e.type === 'AUTH_FAILURE').length
+    const securityViolations = securityMetrics.events.filter(e => e.type === 'SECURITY_VIOLATION').length
+    const accessDenials = securityMetrics.events.filter(e => e.type === 'ACCESS_DENIED').length
+    
+    setMetrics([
+      {
+        title: 'Failed Logins',
+        value: failedLogins,
+        change: failedLogins - securityMetrics.failedAuths,
+        trend: failedLogins > securityMetrics.failedAuths ? 'up' : 'down'
+      },
+      {
+        title: 'Security Violations',
+        value: securityViolations,
+        change: securityViolations - securityMetrics.violations,
+        trend: securityViolations > securityMetrics.violations ? 'up' : 'down'
+      },
+      {
+        title: 'Access Denials',
+        value: accessDenials,
+        change: accessDenials,
+        trend: accessDenials > 0 ? 'up' : 'down'
+      },
+      {
+        title: 'Response Time',
+        value: Math.round(securityMetrics.averageResponseTime),
+        change: 0,
+        trend: securityMetrics.averageResponseTime > 1000 ? 'up' : 'down'
+      }
+    ])
+  }, [monitoring])
   high: 'bg-danger-100 text-danger-800 border-danger-200',
   critical: 'bg-danger-200 text-danger-900 border-danger-300',
 }
