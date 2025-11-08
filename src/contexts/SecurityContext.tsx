@@ -89,8 +89,19 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     // Set up device fingerprinting
   useEffect(() => {
     try {
-      const browserFingerprint = generateBrowserFingerprint()
-      localStorage.setItem('device_fingerprint', browserFingerprint)
+      // Generate browser fingerprint
+      const components = [
+        window.navigator.userAgent,
+        window.navigator.language,
+        window.screen.colorDepth,
+        window.screen.width,
+        window.screen.height,
+        new Date().getTimezoneOffset()
+      ].join('|')
+      
+      // Encrypt the fingerprint for storage
+      const fingerprint = encryptData(components)
+      localStorage.setItem('device_fingerprint', fingerprint)
     } catch (error) {
       console.error('Failed to generate device fingerprint:', error)
     }
@@ -98,7 +109,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
   // Set up CSP and security headers
   useEffect(() => {
-    const nonce = generateCSPNonce()
+    // Generate a random nonce
+    const nonce = crypto.getRandomValues(new Uint8Array(16))
+      .reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '')
+    
     const meta = document.createElement('meta')
     meta.httpEquiv = 'Content-Security-Policy'
     meta.content = `
@@ -114,7 +128,9 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       block-all-mixed-content;
       upgrade-insecure-requests;
     `.replace(/\s+/g, ' ').trim()
-    document.head.appendChild(meta)    return () => {
+    document.head.appendChild(meta)
+    
+    return () => {
       document.head.removeChild(meta)
     }
   }, [csrf])
