@@ -137,43 +137,47 @@ export function SecurityProvider({
   children: React.ReactNode
   performanceConfig?: Partial<PerformanceConfig>
 }) {
-  // Initialize performance monitoring
-  const metrics = usePerformanceMonitoring('SecurityProvider', {
+  // Initialize security performance monitoring
+  const { 
+    metrics,
+    queueOperation,
+    trackOperation,
+    cleanup: cleanupPerformance
+  } = useSecurityPerformance({
+    componentName: 'SecurityProvider',
     threshold: 100,
     enableMemoryMetrics: performanceConfig.metricsEnabled,
-    onThresholdExceeded: (metrics) => {
-      console.warn('[Security] Performance threshold exceeded:', metrics)
-    }
+    batchSize: performanceConfig.maxBatchSize,
+    batchDelay: performanceConfig.batchDelay
   })
 
-  // Initialize core security features with performance tracking
-  const securityMiddleware = useMemo(() => {
-    performance.startOperation('initSecurityMiddleware')
-    const middleware = new SecurityMiddleware(defaultConfig)
-    performance.endOperation()
-    return middleware
-  }, [])
+  // Initialize security services with performance tracking
+  const services = useMemo(() => {
+    metrics.startOperation('initializeSecurityServices');
+    
+    const middleware = new SecurityMiddleware(defaultConfig);
+    const manager = new SessionManager();
+    const csrfProtection = new CSRFProtection();
+    const xssProtection = new XSSProtection();
+    const cache = new SecurityTokenCache(performanceConfig.tokenCacheTTL);
+    
+    metrics.endOperation();
+    
+    return {
+      securityMiddleware: middleware,
+      sessionManager: manager,
+      csrf: csrfProtection,
+      xss: xssProtection,
+      tokenCache: cache
+    };
+  }, [metrics]);
 
-  const sessionManager = useMemo(() => {
-    performance.startOperation('initSessionManager')
-    const manager = new SessionManager()
-    performance.endOperation()
-    return manager
-  }, [])
-
-  const csrf = useMemo(() => {
-    performance.startOperation('initCSRF')
-    const csrfProtection = new CSRFProtection()
-    performance.endOperation()
-    return csrfProtection
-  }, [])
-
-  const xss = useMemo(() => {
-    performance.startOperation('initXSS')
-    const xssProtection = new XSSProtection()
-    performance.endOperation()
-    return xssProtection
-  }, [])
+  // Extract services
+  const securityMiddleware = services.securityMiddleware;
+  const sessionManager = services.sessionManager;
+  const csrf = services.csrf;
+  const xss = services.xss;
+  const tokenCache = services.tokenCache;
   
   // Initialize performance monitoring
   const performance = usePerformanceMonitoring('SecurityContext', {
@@ -352,21 +356,27 @@ export function SecurityProvider({
         metrics.startOperation('securityMaintenance');
         
         // Queue maintenance tasks
-        await Promise.all([
-          queueSecurityUpdate(async () => {
-            await sessionManager.cleanup?.();
-          }),
-          queueSecurityUpdate(async () => {
-            await csrf.clearExpiredTokens();
-          }),
-          queueSecurityUpdate(async () => {
-            await securityMiddleware.cleanup?.();
-          }),
-          queueSecurityUpdate(async () => {
-            tokenCache.cleanup();
-          })
-        ]);
+        const tasks = [];
         
+        // Session cleanup if available
+        if (typeof sessionManager.cleanup === 'function') {
+          tasks.push(queueOperation(() => sessionManager.cleanup()));
+        }
+        
+        // CSRF token cleanup
+        tasks.push(queueOperation(() => csrf.clearExpiredTokens()));
+        
+        // Security middleware cleanup if available
+        if (typeof securityMiddleware.cleanup === 'function') {
+          tasks.push(queueOperation(() => securityMiddleware.cleanup()));
+        }
+        
+        // Token cache cleanup
+        tasks.push(queueOperation(async () => {
+          services.tokenCache.cleanup();
+        }));
+        
+        await Promise.all(tasks);
         metrics.endOperation();
       } finally {
         isRunningMaintenance = false;
