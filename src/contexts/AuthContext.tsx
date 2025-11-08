@@ -1,15 +1,13 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react'
-import { User, LoginCredentials, LoginResponse } from '../types/auth'
-import { useApi } from '../hooks/useApi'
+import { User } from '../types/auth'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { loginSchema } from '../utils/validation'
+import type { LoginForm } from '../utils/validation'
 import { 
-  handleLoginAttempt,
   validateSessionTimeout,
   validateTokenExpiry,
   encryptData,
   decryptData,
-  createSecureHeaders,
-  validatePasswordStrength
 } from '../utils/securityUtils'
 import toast from 'react-hot-toast'
 
@@ -19,33 +17,41 @@ interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
   error: string | null
+  sessionExpiresAt: Date | null
+  lastLoginAt: Date | null
 }
 
 type AuthAction =
   | { type: 'AUTH_START' }
-  | { type: 'AUTH_SUCCESS'; payload: { user: User; token: string } }
+  | { type: 'AUTH_SUCCESS'; payload: { user: User; token: string; expiresAt: Date } }
   | { type: 'AUTH_FAILURE'; payload: string }
   | { type: 'LOGOUT' }
   | { type: 'CLEAR_ERROR' }
   | { type: 'UPDATE_USER'; payload: User }
-  | { type: 'REFRESH_TOKEN_SUCCESS'; payload: string }
+  | { type: 'SESSION_EXPIRED' }
+  | { type: 'REFRESH_TOKEN'; payload: { token: string; expiresAt: Date } }
 
 interface AuthContextType extends AuthState {
-  login: (credentials: LoginCredentials) => Promise<void>
+  login: (credentials: LoginForm) => Promise<void>
   logout: () => void
   clearError: () => void
   updateUser: (user: User) => void
-  refreshToken: () => Promise<void>
+  validateSession: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+const SESSION_DURATION = 30 * 60 * 1000 // 30 minutes in milliseconds
+const TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000 // 25 minutes in milliseconds
 
 const initialState: AuthState = {
   user: null,
   token: null,
   isAuthenticated: false,
   isLoading: false,
-  error: null
+  error: null,
+  sessionExpiresAt: null,
+  lastLoginAt: null,
 }
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
@@ -54,7 +60,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return {
         ...state,
         isLoading: true,
-        error: null
+        error: null,
       }
     case 'AUTH_SUCCESS':
       return {
@@ -63,193 +69,19 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         token: action.payload.token,
         isAuthenticated: true,
         isLoading: false,
-        error: null
+        error: null,
+        sessionExpiresAt: action.payload.expiresAt,
+        lastLoginAt: new Date(),
       }
     case 'AUTH_FAILURE':
       return {
         ...state,
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        isLoading: false,
-        error: action.payload
-      }
-    case 'LOGOUT':
-      return {
-        ...state,
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        error: null
-      }
-    case 'CLEAR_ERROR':
-      return {
-        ...state,
-        error: null
-      }
-    case 'UPDATE_USER':
-      return {
-        ...state,
-        user: action.payload
-      }
-    case 'REFRESH_TOKEN_SUCCESS':
-      return {
-        ...state,
-        token: action.payload
-      }
-    default:
-      return state
-  }
-}
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(authReducer, initialState)
-  const api = useApi()
-  const [, setStoredToken] = useLocalStorage<string>('auth_token', '')
-
-  useEffect(() => {
-    const initializeAuth = async () => {
-      const storedToken = localStorage.getItem('auth_token')
-      if (!storedToken) return
-
-      try {
-        dispatch({ type: 'AUTH_START' })
-        const response = await api.get<User>('/api/auth/me')
-        dispatch({ 
-          type: 'AUTH_SUCCESS', 
-          payload: { user: response, token: storedToken } 
-        })
-      } catch (error) {
-        dispatch({ 
-          type: 'AUTH_FAILURE', 
-          payload: 'Session expired. Please login again.' 
-        })
-        localStorage.removeItem('auth_token')
-      }
-    }
-
-    initializeAuth()
-  }, [api])
-
-  useEffect(() => {
-    if (state.token) {
-      setStoredToken(state.token)
-    } else {
-      localStorage.removeItem('auth_token')
-    }
-  }, [state.token, setStoredToken])
-
-  const login = async (credentials: LoginCredentials) => {
-    try {
-      dispatch({ type: 'AUTH_START' })
-      
-      const response = await api.post<LoginResponse>('/api/auth/login', credentials)
-      
-      dispatch({
-        type: 'AUTH_SUCCESS',
-        payload: {
-          user: response.user,
-          token: response.token
-        }
-      })
-
-      toast.success('Logged in successfully')
-    } catch (error) {
-      const message = error instanceof Error 
-        ? error.message 
-        : 'Failed to login. Please try again.'
-      
-      dispatch({ type: 'AUTH_FAILURE', payload: message })
-      toast.error(message)
-      throw error
-    }
-  }
-
-  const logout = () => {
-    dispatch({ type: 'LOGOUT' })
-    toast.success('Logged out successfully')
-  }
-
-  const clearError = () => {
-    dispatch({ type: 'CLEAR_ERROR' })
-  }
-
-  const updateUser = (user: User) => {
-    dispatch({ type: 'UPDATE_USER', payload: user })
-  }
-
-  const refreshToken = async () => {
-    try {
-      const response = await api.post<LoginResponse>('/api/auth/refresh')
-      dispatch({
-        type: 'REFRESH_TOKEN_SUCCESS',
-        payload: response.token
-      })
-    } catch (error) {
-      dispatch({ type: 'LOGOUT' })
-      toast.error('Session expired. Please login again.')
-    }
-  }
-
-  const value = {
-    ...state,
-    login,
-    logout,
-    clearError,
-    updateUser,
-    refreshToken
-  }
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  )
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider')
-  }
-  return context
-}
-  isAuthenticated: false,
-  isLoading: false,
-  error: null,
-}
-
-function authReducer(state: AuthState, action: AuthAction): AuthState {
-  switch (action.type) {
-    case 'LOGIN_START':
-      return {
-        ...state,
-        isLoading: true,
-        error: null,
-      }
-    case 'LOGIN_SUCCESS':
-      return {
-        ...state,
-        user: action.payload,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-      }
-    case 'LOGIN_FAILURE':
-      return {
-        ...state,
-        user: null,
-        isAuthenticated: false,
         isLoading: false,
         error: action.payload,
       }
     case 'LOGOUT':
       return {
-        ...state,
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-        error: null,
+        ...initialState,
       }
     case 'CLEAR_ERROR':
       return {
@@ -260,6 +92,17 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return {
         ...state,
         user: action.payload,
+      }
+    case 'SESSION_EXPIRED':
+      return {
+        ...initialState,
+        error: 'Session expired. Please login again.',
+      }
+    case 'REFRESH_TOKEN':
+      return {
+        ...state,
+        token: action.payload.token,
+        sessionExpiresAt: action.payload.expiresAt,
       }
     default:
       return state
@@ -285,45 +128,161 @@ const mockUser: User = {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState)
+  const [storedToken, setStoredToken] = useLocalStorage<string>('auth_token', '')
 
   // Check for existing session on mount
   useEffect(() => {
-    const savedUser = localStorage.getItem('user')
-    if (savedUser) {
+    const initializeAuth = async () => {
+      if (!storedToken) return
+
+      // Validate token expiry
+      if (!validateTokenExpiry(storedToken)) {
+        dispatch({ type: 'SESSION_EXPIRED' })
+        return
+      }
+
       try {
-        const user = JSON.parse(savedUser)
-        dispatch({ type: 'LOGIN_SUCCESS', payload: user })
+        dispatch({ type: 'AUTH_START' })
+        
+        // Decrypt stored user data
+        const encryptedUser = localStorage.getItem('user')
+        if (!encryptedUser) throw new Error('No user data found')
+        
+        const decryptedUser = decryptData(encryptedUser)
+        if (!decryptedUser) throw new Error('Invalid user data')
+
+        const user = JSON.parse(decryptedUser)
+        const expiresAt = new Date(Date.now() + SESSION_DURATION)
+        
+        dispatch({ 
+          type: 'AUTH_SUCCESS',
+          payload: {
+            user,
+            token: storedToken,
+            expiresAt,
+          },
+        })
       } catch (error) {
+        dispatch({ type: 'SESSION_EXPIRED' })
+        localStorage.removeItem('auth_token')
         localStorage.removeItem('user')
       }
     }
-  }, [])
+
+    initializeAuth()
+  }, [storedToken])
+
+  // Session validation effect
+  useEffect(() => {
+    if (!state.isAuthenticated) return
+
+    const validateCurrentSession = async () => {
+      const isValid = await validateSession()
+      if (!isValid) {
+        dispatch({ type: 'SESSION_EXPIRED' })
+      }
+    }
+
+    const sessionCheckInterval = setInterval(validateCurrentSession, 60000) // Check every minute
+    return () => clearInterval(sessionCheckInterval)
+  }, [state.isAuthenticated])
+
+  // Token refresh effect
+  useEffect(() => {
+    if (!state.isAuthenticated || !state.token) return
+
+    const refreshTokenTimer = setInterval(async () => {
+      try {
+        const newToken = 'new-mock-token' // In real app, get from API
+        const expiresAt = new Date(Date.now() + SESSION_DURATION)
+        
+        dispatch({
+          type: 'REFRESH_TOKEN',
+          payload: { token: newToken, expiresAt },
+        })
+        
+        setStoredToken(newToken)
+      } catch (error) {
+        dispatch({ type: 'SESSION_EXPIRED' })
+      }
+    }, TOKEN_REFRESH_INTERVAL)
+
+    return () => clearInterval(refreshTokenTimer)
+  }, [state.isAuthenticated, state.token, setStoredToken])
+
+  const validateSession = async (): Promise<boolean> => {
+    if (!state.sessionExpiresAt || !state.token) return false
+    
+    // Check if session has expired
+    if (new Date() > state.sessionExpiresAt) {
+      dispatch({ type: 'SESSION_EXPIRED' })
+      return false
+    }
+
+    // Validate session timeout
+    if (!validateSessionTimeout(state.lastLoginAt)) {
+      dispatch({ type: 'SESSION_EXPIRED' })
+      return false
+    }
+
+    return true
+  }
 
   const login = async (credentials: LoginForm) => {
-    dispatch({ type: 'LOGIN_START' })
-    
     try {
-      // Simulate API call
+      dispatch({ type: 'AUTH_START' })
+
+      // Validate input using Zod schema
+      const validationResult = await loginSchema.safeParseAsync(credentials)
+      if (!validationResult.success) {
+        throw new Error(validationResult.error.errors[0].message)
+      }
+
+      // Simulate API call in development
       await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Mock authentication - in real app, validate with backend
-      if (credentials.email === 'admin@securedbank.com' && credentials.password === 'admin123') {
-        const user = { ...mockUser, lastLogin: new Date() }
-        localStorage.setItem('user', JSON.stringify(user))
-        dispatch({ type: 'LOGIN_SUCCESS', payload: user })
-        toast.success('Login successful!')
+
+      // In development, use mock authentication
+      if (process.env.NODE_ENV === 'development') {
+        if (credentials.email === 'admin@securedbank.com' && credentials.password === 'admin123') {
+          const token = 'mock-token'
+          const expiresAt = new Date(Date.now() + SESSION_DURATION)
+          const user = { ...mockUser, lastLogin: new Date() }
+          
+          // Encrypt user data before storing
+          const encryptedUser = encryptData(JSON.stringify(user))
+          localStorage.setItem('user', encryptedUser)
+          
+          dispatch({ 
+            type: 'AUTH_SUCCESS',
+            payload: { user, token, expiresAt }
+          })
+          
+          setStoredToken(token)
+          
+          if (credentials.rememberMe) {
+            localStorage.setItem('remember_me', 'true')
+          }
+
+          toast.success('Login successful!')
+        } else {
+          throw new Error('Invalid credentials')
+        }
       } else {
-        throw new Error('Invalid credentials')
+        // Production API call would go here
+        throw new Error('Not implemented')
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed'
-      dispatch({ type: 'LOGIN_FAILURE', payload: message })
+      dispatch({ type: 'AUTH_FAILURE', payload: message })
       toast.error(message)
+      throw error
     }
   }
 
   const logout = () => {
+    localStorage.removeItem('auth_token')
     localStorage.removeItem('user')
+    localStorage.removeItem('remember_me')
     dispatch({ type: 'LOGOUT' })
     toast.success('Logged out successfully')
   }
@@ -333,8 +292,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const updateUser = (user: User) => {
-    localStorage.setItem('user', JSON.stringify(user))
-    dispatch({ type: 'UPDATE_USER', payload: user })
+    try {
+      const encryptedUser = encryptData(JSON.stringify(user))
+      localStorage.setItem('user', encryptedUser)
+      dispatch({ type: 'UPDATE_USER', payload: user })
+    } catch (error) {
+      console.error('Failed to update user:', error)
+      toast.error('Failed to update user information')
+    }
   }
 
   const value: AuthContextType = {
@@ -343,6 +308,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     logout,
     clearError,
     updateUser,
+    validateSession,
   }
 
   return (

@@ -47,8 +47,11 @@ export interface LoginAttemptResult {
   remainingAttempts: number
 }
 
-export const validateSessionTimeout = (lastActivityTime: number): boolean => {
-  return Date.now() - lastActivityTime < SESSION_TIMEOUT
+export const validateSessionTimeout = (
+  lastActivityTime: Date | null
+): boolean => {
+  if (!lastActivityTime) return false
+  return Date.now() - lastActivityTime.getTime() < SESSION_TIMEOUT
 }
 
 export const handleLoginAttempt = (
