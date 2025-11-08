@@ -165,19 +165,6 @@ export function SecurityProvider({
   const xss = services.xss;
   const tokenCache = services.tokenCache;
   
-  // Initialize performance monitoring
-  const monitoring = useMonitoring({
-    componentName: 'SecurityContext',
-    memoryInterval: DEFAULT_PERFORMANCE_CONFIG.cleanupInterval,
-    securityThreshold: DEFAULT_PERFORMANCE_CONFIG.tokenCacheTTL,
-    enableMemoryMetrics: DEFAULT_PERFORMANCE_CONFIG.metricsEnabled,
-    securityBatchSize: DEFAULT_PERFORMANCE_CONFIG.maxBatchSize,
-    securityBatchDelay: DEFAULT_PERFORMANCE_CONFIG.batchDelay
-  })
-  
-  // Initialize token cache
-  const tokenCache = useRef(new SecurityTokenCache(300000)).current // 5 minutes TTL
-  
   // Track batch updates
   const pendingUpdates = useRef<Set<() => Promise<void>>>(new Set())
   const batchTimeout = useRef<number>()
@@ -287,8 +274,8 @@ export function SecurityProvider({
       );
     }
     
-    performance.endOperation();
-  }, 1000); // Debounce for 1 second
+    });
+  }, [monitoring.security, handleSecurityTimeout]); // Debounce for 1 second
 
   // Monitor inactivity with timestamp tracking
   const monitorInactivity = useCallback(() => {
@@ -316,64 +303,47 @@ export function SecurityProvider({
   
   // Optimized resume inactivity monitoring
   const resumeInactivityMonitoring = useCallback(() => {
-    performance.startOperation('resumeInactivity');
-    
-    inactivityPaused.current = false;
-    monitorInactivity();
-    
-    if (defaultConfig.accessibility.sessionAlerts) {
-      queueSecurityUpdate(async () => {
-        announceSecurityEvent('Security timeout resumed');
-      });
-    }
-    
-    performance.endOperation();
+    void monitoring.security.trackOperation('resumeInactivity', async () => {
+      inactivityPaused.current = false;
+      monitorInactivity();
+      
+      if (defaultConfig.accessibility.sessionAlerts) {
+        await queueSecurityUpdate(async () => {
+          announceSecurityEvent('Security timeout resumed');
+        });
+      }
+    });
   }, [monitorInactivity]);
 
   // Set up optimized security maintenance
   useEffect(() => {
-    metrics.startOperation('setupMaintenanceInterval');
-    
     let isRunningMaintenance = false;
     const performMaintenance = async () => {
       if (isRunningMaintenance) return;
       
-      try {
-        isRunningMaintenance = true;
-        metrics.startOperation('securityMaintenance');
-        
-        // Queue maintenance tasks
-        const tasks = [];
-        
-        // Queue cleanup tasks as async operations
-        tasks.push(
-          queueOperation(async () => {
-            // Wrap synchronous operations in promises
-            await Promise.resolve().then(() => {
-              // Session cleanup
-              if (sessionManager.cleanup && typeof sessionManager.cleanup === 'function') {
-                sessionManager.cleanup();
-              }
-              
-              // CSRF cleanup
-              csrf.clearExpiredTokens();
-              
-              // Security middleware cleanup
-              if (securityMiddleware.cleanup && typeof securityMiddleware.cleanup === 'function') {
-                securityMiddleware.cleanup();
-              }
-              
-              // Token cache cleanup
-              services.tokenCache.cleanup();
-            });
-          })
-        );
-        
-        await Promise.all(tasks);
-        metrics.endOperation();
-      } finally {
-        isRunningMaintenance = false;
-      }
+      await monitoring.security.trackOperation('securityMaintenance', async () => {
+        try {
+          isRunningMaintenance = true;
+          
+          // Session cleanup
+          if (typeof sessionManager.cleanup === 'function') {
+            sessionManager.cleanup();
+          }
+          
+          // CSRF cleanup
+          csrf.clearExpiredTokens();
+          
+          // Security middleware cleanup
+          if (typeof securityMiddleware.cleanup === 'function') {
+            securityMiddleware.cleanup();
+          }
+          
+          // Token cache cleanup
+          tokenCache.cleanup();
+        } finally {
+          isRunningMaintenance = false;
+        }
+      });
     };
 
     const maintenanceInterval = setInterval(
@@ -491,36 +461,38 @@ export function SecurityProvider({
   }, [processBatchedUpdates]);
 
   // Optimized security token management
-  const getSecurityToken = useCallback((type: string, userId: string): string | null => {
+  const getSecurityToken = useCallback(async (type: string, userId: string): Promise<string | null> => {
     const cachedToken = tokenCache.get(`${type}_${userId}`);
     if (cachedToken) return cachedToken;
 
-    let newToken: string | null = null;
-    performance.startOperation('generateSecurityToken');
-    
-    try {
-      switch (type) {
-        case 'csrf':
-          newToken = csrf.generateToken(userId);
-          break;
-        case 'session':
-          const fingerprint = localStorage.getItem('device_fingerprint');
-          if (fingerprint) {
-            const session = sessionManager.createSession(userId, fingerprint);
-            newToken = session.id;
-          }
-          break;
+    return monitoring.security.trackOperation('generateSecurityToken', async () => {
+      let newToken: string | null = null;
+      
+      try {
+        switch (type) {
+          case 'csrf':
+            newToken = csrf.generateToken(userId);
+            break;
+          case 'session':
+            const fingerprint = localStorage.getItem('device_fingerprint');
+            if (fingerprint) {
+              const session = sessionManager.createSession(userId, fingerprint);
+              newToken = session.id;
+            }
+            break;
+        }
+
+        if (newToken) {
+          tokenCache.set(`${type}_${userId}`, newToken, type);
+        }
+      } catch (error) {
+        console.error(`Failed to generate ${type} token:`, error);
+        return null;
       }
 
-      if (newToken) {
-        tokenCache.set(`${type}_${userId}`, newToken, type);
-      }
-    } finally {
-      performance.endOperation();
-    }
-
-    return newToken;
-  }, []);
+      return newToken;
+    });
+  }, [monitoring.security, csrf, sessionManager, tokenCache]);
 
   // Optimized security refresh
   const refreshSecurity = useCallback(async () => {
