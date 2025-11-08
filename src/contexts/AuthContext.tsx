@@ -1,33 +1,210 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react'
-import { User, LoginForm } from '@types'
+import { User, LoginCredentials, LoginResponse } from '../types/auth'
+import { useApi } from '../hooks/useApi'
+import { useLocalStorage } from '../hooks/useLocalStorage'
 import toast from 'react-hot-toast'
 
 interface AuthState {
   user: User | null
+  token: string | null
   isAuthenticated: boolean
   isLoading: boolean
   error: string | null
 }
 
 type AuthAction =
-  | { type: 'LOGIN_START' }
-  | { type: 'LOGIN_SUCCESS'; payload: User }
-  | { type: 'LOGIN_FAILURE'; payload: string }
+  | { type: 'AUTH_START' }
+  | { type: 'AUTH_SUCCESS'; payload: { user: User; token: string } }
+  | { type: 'AUTH_FAILURE'; payload: string }
   | { type: 'LOGOUT' }
   | { type: 'CLEAR_ERROR' }
   | { type: 'UPDATE_USER'; payload: User }
+  | { type: 'REFRESH_TOKEN_SUCCESS'; payload: string }
 
 interface AuthContextType extends AuthState {
-  login: (credentials: LoginForm) => Promise<void>
+  login: (credentials: LoginCredentials) => Promise<void>
   logout: () => void
   clearError: () => void
   updateUser: (user: User) => void
+  refreshToken: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const initialState: AuthState = {
   user: null,
+  token: null,
+  isAuthenticated: false,
+  isLoading: false,
+  error: null
+}
+
+function authReducer(state: AuthState, action: AuthAction): AuthState {
+  switch (action.type) {
+    case 'AUTH_START':
+      return {
+        ...state,
+        isLoading: true,
+        error: null
+      }
+    case 'AUTH_SUCCESS':
+      return {
+        ...state,
+        user: action.payload.user,
+        token: action.payload.token,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null
+      }
+    case 'AUTH_FAILURE':
+      return {
+        ...state,
+        user: null,
+        token: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: action.payload
+      }
+    case 'LOGOUT':
+      return {
+        ...state,
+        user: null,
+        token: null,
+        isAuthenticated: false,
+        error: null
+      }
+    case 'CLEAR_ERROR':
+      return {
+        ...state,
+        error: null
+      }
+    case 'UPDATE_USER':
+      return {
+        ...state,
+        user: action.payload
+      }
+    case 'REFRESH_TOKEN_SUCCESS':
+      return {
+        ...state,
+        token: action.payload
+      }
+    default:
+      return state
+  }
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [state, dispatch] = useReducer(authReducer, initialState)
+  const api = useApi()
+  const [, setStoredToken] = useLocalStorage<string>('auth_token', '')
+
+  useEffect(() => {
+    const initializeAuth = async () => {
+      const storedToken = localStorage.getItem('auth_token')
+      if (!storedToken) return
+
+      try {
+        dispatch({ type: 'AUTH_START' })
+        const response = await api.get<User>('/api/auth/me')
+        dispatch({ 
+          type: 'AUTH_SUCCESS', 
+          payload: { user: response, token: storedToken } 
+        })
+      } catch (error) {
+        dispatch({ 
+          type: 'AUTH_FAILURE', 
+          payload: 'Session expired. Please login again.' 
+        })
+        localStorage.removeItem('auth_token')
+      }
+    }
+
+    initializeAuth()
+  }, [api])
+
+  useEffect(() => {
+    if (state.token) {
+      setStoredToken(state.token)
+    } else {
+      localStorage.removeItem('auth_token')
+    }
+  }, [state.token, setStoredToken])
+
+  const login = async (credentials: LoginCredentials) => {
+    try {
+      dispatch({ type: 'AUTH_START' })
+      
+      const response = await api.post<LoginResponse>('/api/auth/login', credentials)
+      
+      dispatch({
+        type: 'AUTH_SUCCESS',
+        payload: {
+          user: response.user,
+          token: response.token
+        }
+      })
+
+      toast.success('Logged in successfully')
+    } catch (error) {
+      const message = error instanceof Error 
+        ? error.message 
+        : 'Failed to login. Please try again.'
+      
+      dispatch({ type: 'AUTH_FAILURE', payload: message })
+      toast.error(message)
+      throw error
+    }
+  }
+
+  const logout = () => {
+    dispatch({ type: 'LOGOUT' })
+    toast.success('Logged out successfully')
+  }
+
+  const clearError = () => {
+    dispatch({ type: 'CLEAR_ERROR' })
+  }
+
+  const updateUser = (user: User) => {
+    dispatch({ type: 'UPDATE_USER', payload: user })
+  }
+
+  const refreshToken = async () => {
+    try {
+      const response = await api.post<LoginResponse>('/api/auth/refresh')
+      dispatch({
+        type: 'REFRESH_TOKEN_SUCCESS',
+        payload: response.token
+      })
+    } catch (error) {
+      dispatch({ type: 'LOGOUT' })
+      toast.error('Session expired. Please login again.')
+    }
+  }
+
+  const value = {
+    ...state,
+    login,
+    logout,
+    clearError,
+    updateUser,
+    refreshToken
+  }
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider')
+  }
+  return context
+}
   isAuthenticated: false,
   isLoading: false,
   error: null,
