@@ -34,6 +34,6 @@ export const useMonitoring = ({
     memory,
     security,
     isLoading: performance.isLoading || !memory.isSupported,
-    hasError: performance.hasError || security.metrics.hasError,
+    hasError: performance.hasError || !security.metrics,
   }
 }
