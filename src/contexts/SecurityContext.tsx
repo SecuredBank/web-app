@@ -143,6 +143,16 @@ const DEFAULT_CONFIG: Required<SecurityConfig> = {
   }
 }
 
+// Hook to consume security context
+export function useSecurity(): SecurityContextType {
+  const context = useContext(SecurityContext);
+  if (context === undefined) {
+    throw new Error('useSecurity must be used within SecurityProvider');
+  }
+  return context;
+}
+
+// Provider component
 export const SecurityProvider: React.FC<{
   children: React.ReactNode;
   performanceConfig?: Partial<PerformanceConfig>;
@@ -151,10 +161,13 @@ export const SecurityProvider: React.FC<{
   children,
   performanceConfig: userPerformanceConfig,
   securityConfig: userSecurityConfig
-}) => {
+}): React.ReactElement => {
   // Component state
   const [isSecureInputFocused, setIsSecureInputFocused] = useState(false);
   const inactivityPaused = useRef(false);
+  const pendingUpdates = useRef<Set<() => Promise<void>>>(new Set());
+  const batchTimeout = useRef<number>();
+  const inactivityTimer = useRef<number>();
 
   // Merge configs with defaults
   const performanceConfig = useMemo(() => ({
@@ -465,25 +478,25 @@ export const SecurityProvider: React.FC<{
     const performMaintenance = async () => {
       if (isRunningMaintenance) return;
       
-      await monitoring.security.trackOperation('securityMaintenance', async () => {
+      await monitoring.trackOperation('securityMaintenance', async () => {
         try {
           isRunningMaintenance = true;
           
           // Session cleanup
-          if (typeof sessionManager.cleanup === 'function') {
-            sessionManager.cleanup();
+          if (typeof services.sessionManager.cleanup === 'function') {
+            services.sessionManager.cleanup();
           }
           
           // CSRF cleanup
-          csrf.clearExpiredTokens();
+          services.csrf.clearExpiredTokens();
           
           // Security middleware cleanup
-          if (typeof securityMiddleware.cleanup === 'function') {
-            securityMiddleware.cleanup();
+          if (typeof services.securityMiddleware.cleanup === 'function') {
+            services.securityMiddleware.cleanup();
           }
           
           // Token cache cleanup
-          tokenCache.cleanup();
+          services.tokenCache.cleanup();
         } finally {
           isRunningMaintenance = false;
         }
@@ -496,16 +509,14 @@ export const SecurityProvider: React.FC<{
     );
 
     // Initial maintenance
-    performMaintenance();
+    void performMaintenance();
 
     return () => {
       clearInterval(maintenanceInterval);
-      metrics.startOperation('cleanupMaintenance');
       // Final cleanup
       void performMaintenance();
-      metrics.endOperation();
     };
-  }, [sessionManager, csrf, securityMiddleware, metrics]);
+  }, [services, monitoring, performanceConfig.cleanupInterval]);
 
     // Set up device fingerprinting
   useEffect(() => {
@@ -693,29 +704,7 @@ export const SecurityProvider: React.FC<{
     };
   }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce]);
 
-  const contextValue: SecurityContextType = {
-    securityMiddleware,
-    sessionManager,
-    csrf,
-    xss,
-    refreshSecurity,
-    announceSecurityEvent,
-    clearSensitiveData,
-    handleSecurityTimeout,
-    resetSecurityFocus,
-    isSecureInputFocused,
-    startSecureSession,
-    endSecureSession,
-    monitorInactivity,
-    pauseInactivityMonitoring,
-    resumeInactivityMonitoring
-  };
 
-  return (
-    <SecurityContext.Provider value={contextValue}>
-      {children}
-    </SecurityContext.Provider>
-  );
 }
 
 export const useSecurity = () => {
@@ -748,10 +737,20 @@ export const useSecurity = () => {
   )
 }
 
-export function useSecurity() {
-  const context = useContext(SecurityContext)
+// Hook to consume security context
+export function useSecurity(): SecurityContextType {
+  const context = useContext(SecurityContext);
   if (context === undefined) {
-    throw new Error('useSecurity must be used within a SecurityProvider')
+    throw new Error('useSecurity must be used within a SecurityProvider');
   }
-  return context
+  return context;
+}
+
+// Hook for monitoring only
+export function useSecurityMonitoring() {
+  const { security } = useMonitoring();
+  if (!security) {
+    throw new Error('useSecurityMonitoring must be used within MonitoringProvider');
+  }
+  return security;
 }
