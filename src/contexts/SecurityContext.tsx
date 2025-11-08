@@ -208,39 +208,69 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     clearSensitiveData()
   }
   
-  // Monitor user inactivity
-  const monitorInactivity = () => {
+  // Optimized inactivity monitoring with debounce
+  const debouncedInactivityCheck = useDebounce((timestamp: number) => {
+    performance.startOperation('inactivityCheck');
+    
     if (inactivityTimer.current) {
-      window.clearTimeout(inactivityTimer.current)
+      window.clearTimeout(inactivityTimer.current);
     }
     
     if (!inactivityPaused.current && defaultConfig.accessibility.logoutOnInactivity) {
+      // Calculate remaining time based on last activity
+      const remainingTime = Math.max(
+        0,
+        defaultConfig.accessibility.inactivityTimeout - (Date.now() - timestamp)
+      );
+
       inactivityTimer.current = window.setTimeout(
         handleSecurityTimeout,
-        defaultConfig.accessibility.inactivityTimeout
-      )
+        remainingTime
+      );
     }
-  }
+    
+    performance.endOperation();
+  }, 1000); // Debounce for 1 second
+
+  // Monitor inactivity with timestamp tracking
+  const monitorInactivity = useCallback(() => {
+    const timestamp = Date.now();
+    debouncedInactivityCheck(timestamp);
+  }, [debouncedInactivityCheck]);
   
-  // Pause inactivity monitoring
-  const pauseInactivityMonitoring = () => {
-    inactivityPaused.current = true
+  // Optimized pause inactivity monitoring
+  const pauseInactivityMonitoring = useCallback(() => {
+    performance.startOperation('pauseInactivity');
+    
+    inactivityPaused.current = true;
     if (inactivityTimer.current) {
-      window.clearTimeout(inactivityTimer.current)
+      window.clearTimeout(inactivityTimer.current);
     }
+    
     if (defaultConfig.accessibility.sessionAlerts) {
-      announceSecurityEvent('Security timeout paused')
+      queueSecurityUpdate(async () => {
+        announceSecurityEvent('Security timeout paused');
+      });
     }
-  }
+    
+    performance.endOperation();
+  }, []);
   
-  // Resume inactivity monitoring
-  const resumeInactivityMonitoring = () => {
-    inactivityPaused.current = false
-    monitorInactivity()
+  // Optimized resume inactivity monitoring
+  const resumeInactivityMonitoring = useCallback(() => {
+    performance.startOperation('resumeInactivity');
+    
+    inactivityPaused.current = false;
+    monitorInactivity();
+    
     if (defaultConfig.accessibility.sessionAlerts) {
-      announceSecurityEvent('Security timeout resumed')
+      queueSecurityUpdate(async () => {
+        announceSecurityEvent('Security timeout resumed');
+      });
     }
-  }
+    
+    performance.endOperation();
+  }, [monitorInactivity]);
 
   // Set up regular security maintenance
   useEffect(() => {
@@ -415,27 +445,53 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     performance.endOperation();
   }, [queueSecurityUpdate, getSecurityToken]);
 
-  // Set up event listeners for inactivity monitoring
+  // Event listener management with cleanup and performance tracking
   useEffect(() => {
-    if (!defaultConfig.accessibility.logoutOnInactivity) return
-
-    const events = ['mousemove', 'mousedown', 'keypress', 'DOMMouseScroll', 'mousewheel', 'touchmove', 'MSPointerMove']
+    if (!defaultConfig.accessibility.logoutOnInactivity) return;
     
-    events.forEach(event => {
-      window.addEventListener(event, monitorInactivity)
-    })
+    performance.startOperation('setupEventListeners');
     
-    monitorInactivity() // Start initial timer
+    // Map of events to their throttled/debounced handlers
+    const eventHandlers = new Map([
+      ['keydown', monitorInactivity],
+      ['mousedown', monitorInactivity],
+      ['mousemove', useDebounce(monitorInactivity, 250)], // Debounce high-frequency events
+      ['wheel', useDebounce(monitorInactivity, 250)],
+      ['touchstart', monitorInactivity],
+      ['touchmove', useDebounce(monitorInactivity, 250)],
+      ['focus', monitorInactivity]
+    ]);
     
-    return () => {
-      events.forEach(event => {
-        window.removeEventListener(event, monitorInactivity)
-      })
-      if (inactivityTimer.current) {
-        window.clearTimeout(inactivityTimer.current)
+    // Batch add event listeners
+    queueSecurityUpdate(async () => {
+      for (const [event, handler] of eventHandlers.entries()) {
+        window.addEventListener(event, handler, { passive: true });
       }
-    }
-  }, [])
+    });
+    
+    monitorInactivity(); // Start initial timer
+    performance.endOperation();
+    
+    // Cleanup function
+    return () => {
+      performance.startOperation('cleanupEventListeners');
+      
+      // Batch remove event listeners
+      for (const [event, handler] of eventHandlers.entries()) {
+        window.removeEventListener(event, handler);
+      }
+      
+      if (inactivityTimer.current) {
+        window.clearTimeout(inactivityTimer.current);
+      }
+      
+      if (batchTimeout.current) {
+        window.clearTimeout(batchTimeout.current);
+      }
+      
+      performance.endOperation();
+    };
+  }, [monitorInactivity]);
 
   const value: SecurityContextType = {
     securityMiddleware,
