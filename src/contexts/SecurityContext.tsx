@@ -1,10 +1,13 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
+import React, { createContext, useContext, useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { SecurityMiddleware } from '../utils/securityMiddleware'
 import { SessionManager } from '../utils/sessionManager'
 import { CSRFProtection } from '../utils/csrfProtection'
 import { XSSProtection } from '../utils/xssProtection'
 import { encryptData, decryptData } from '../utils/securityUtils'
 import { useA11y } from './A11yContext'
+import { useDebounce } from '../hooks/useDebounce'
+import { usePerformanceMonitoring } from '../hooks/usePerformanceMonitoring'
+import { SecurityTokenCache } from '../utils/SecurityTokenCache'
 
 interface SecurityConfig {
   xss: { enabled: boolean }
@@ -107,6 +110,22 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const sessionManager = useRef(new SessionManager()).current
   const csrf = useRef(new CSRFProtection()).current
   const xss = useRef(new XSSProtection()).current
+  
+  // Initialize performance monitoring
+  const performance = usePerformanceMonitoring('SecurityContext', {
+    threshold: 100,
+    enableMemoryMetrics: true,
+    onThresholdExceeded: (metrics) => {
+      console.warn('Security operation exceeded threshold:', metrics);
+    }
+  })
+  
+  // Initialize token cache
+  const tokenCache = useRef(new SecurityTokenCache(300000)).current // 5 minutes TTL
+  
+  // Track batch updates
+  const pendingUpdates = useRef<Set<() => Promise<void>>>(new Set())
+  const batchTimeout = useRef<number>()
   
   // Get accessibility context
   const a11y = useA11y()
@@ -306,22 +325,95 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     }
   }, [securityMiddleware])
 
-  // Function to refresh security context
-  const refreshSecurity = async () => {
-    const userId = localStorage.getItem('user_id')
-    if (userId) {
-      // Generate new CSRF token
-      const newToken = csrf.generateToken(userId)
-      localStorage.setItem('csrf_token', newToken)
+  // Batched security updates
+  const processBatchedUpdates = useCallback(async () => {
+    performance.startOperation('processBatchedUpdates');
+    const updates = Array.from(pendingUpdates.current);
+    pendingUpdates.current.clear();
 
-      // Create new session if needed
-      const fingerprint = localStorage.getItem('device_fingerprint')
-      if (fingerprint && !sessionManager.getSession(localStorage.getItem('session_id') || '', fingerprint)) {
-        const session = sessionManager.createSession(userId, fingerprint)
-        localStorage.setItem('session_id', session.id)
-      }
+    try {
+      await Promise.all(updates.map(update => update()));
+    } catch (error) {
+      console.error('Error processing security updates:', error);
     }
-  }
+
+    performance.endOperation();
+  }, []);
+
+  // Add update to batch
+  const queueSecurityUpdate = useCallback((update: () => Promise<void>) => {
+    pendingUpdates.current.add(update);
+    
+    if (batchTimeout.current) {
+      window.clearTimeout(batchTimeout.current);
+    }
+    
+    batchTimeout.current = window.setTimeout(processBatchedUpdates, 100);
+  }, [processBatchedUpdates]);
+
+  // Optimized security token management
+  const getSecurityToken = useCallback((type: string, userId: string): string | null => {
+    const cachedToken = tokenCache.get(`${type}_${userId}`);
+    if (cachedToken) return cachedToken;
+
+    let newToken: string | null = null;
+    performance.startOperation('generateSecurityToken');
+    
+    try {
+      switch (type) {
+        case 'csrf':
+          newToken = csrf.generateToken(userId);
+          break;
+        case 'session':
+          const fingerprint = localStorage.getItem('device_fingerprint');
+          if (fingerprint) {
+            const session = sessionManager.createSession(userId, fingerprint);
+            newToken = session.id;
+          }
+          break;
+      }
+
+      if (newToken) {
+        tokenCache.set(`${type}_${userId}`, newToken, type);
+      }
+    } finally {
+      performance.endOperation();
+    }
+
+    return newToken;
+  }, []);
+
+  // Optimized security refresh
+  const refreshSecurity = useCallback(async () => {
+    performance.startOperation('refreshSecurity');
+    const userId = localStorage.getItem('user_id');
+
+    if (userId) {
+      queueSecurityUpdate(async () => {
+        // Generate new CSRF token
+        const newToken = getSecurityToken('csrf', userId);
+        if (newToken) {
+          localStorage.setItem('csrf_token', newToken);
+        }
+
+        // Create new session if needed
+        const fingerprint = localStorage.getItem('device_fingerprint');
+        if (fingerprint) {
+          const sessionId = localStorage.getItem('session_id');
+          const hasValidSession = sessionId && sessionManager.getSession(sessionId, fingerprint);
+
+          if (!hasValidSession) {
+            const newSessionToken = getSecurityToken('session', userId);
+            if (newSessionToken) {
+              localStorage.setItem('session_id', newSessionToken);
+            }
+          }
+        }
+      });
+    }
+
+    performance.endOperation();
+  }, [queueSecurityUpdate, getSecurityToken]);
 
   // Set up event listeners for inactivity monitoring
   useEffect(() => {
