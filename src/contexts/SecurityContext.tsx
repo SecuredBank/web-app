@@ -6,14 +6,8 @@ import { XSSProtection } from '../utils/xssProtection'
 import { encryptData, decryptData } from '../utils/securityUtils'
 import { useA11y } from './A11yContext'
 import { useDebounce } from '../hooks/useDebounce'
-import { useSecurityPerformance } from '../hooks/useSecurityPerformance'
 import { SecurityTokenCache } from '../utils/SecurityTokenCache'
-
-interface CachedOperation<T> {
-  result: T
-  timestamp: number
-  expiry: number
-}
+import { useMonitoring } from '../hooks/useMonitoring'
 
 interface PerformanceConfig {
   tokenCacheTTL: number
@@ -137,31 +131,23 @@ export function SecurityProvider({
   children: React.ReactNode
   performanceConfig?: Partial<PerformanceConfig>
 }) {
-  // Initialize security performance monitoring
-  const { 
-    metrics,
-    queueOperation,
-    trackOperation,
-    cleanup: cleanupPerformance
-  } = useSecurityPerformance({
-    componentName: 'SecurityProvider',
-    threshold: 100,
+  // Initialize monitoring and services
+  const monitoring = useMonitoring({
+    componentName: 'SecurityContext',
+    memoryInterval: performanceConfig.cleanupInterval,
+    securityThreshold: performanceConfig.tokenCacheTTL,
     enableMemoryMetrics: performanceConfig.metricsEnabled,
-    batchSize: performanceConfig.maxBatchSize,
-    batchDelay: performanceConfig.batchDelay
+    securityBatchSize: performanceConfig.maxBatchSize,
+    securityBatchDelay: performanceConfig.batchDelay
   })
 
-  // Initialize security services with performance tracking
+  // Initialize security services
   const services = useMemo(() => {
-    metrics.startOperation('initializeSecurityServices');
-    
     const middleware = new SecurityMiddleware(defaultConfig);
     const manager = new SessionManager();
     const csrfProtection = new CSRFProtection();
     const xssProtection = new XSSProtection();
     const cache = new SecurityTokenCache(performanceConfig.tokenCacheTTL);
-    
-    metrics.endOperation();
     
     return {
       securityMiddleware: middleware,
@@ -170,7 +156,7 @@ export function SecurityProvider({
       xss: xssProtection,
       tokenCache: cache
     };
-  }, [metrics]);
+  }, [performanceConfig.tokenCacheTTL]);
 
   // Extract services
   const securityMiddleware = services.securityMiddleware;
@@ -180,12 +166,13 @@ export function SecurityProvider({
   const tokenCache = services.tokenCache;
   
   // Initialize performance monitoring
-  const performance = usePerformanceMonitoring('SecurityContext', {
-    threshold: 100,
-    enableMemoryMetrics: true,
-    onThresholdExceeded: (metrics) => {
-      console.warn('Security operation exceeded threshold:', metrics);
-    }
+  const monitoring = useMonitoring({
+    componentName: 'SecurityContext',
+    memoryInterval: DEFAULT_PERFORMANCE_CONFIG.cleanupInterval,
+    securityThreshold: DEFAULT_PERFORMANCE_CONFIG.tokenCacheTTL,
+    enableMemoryMetrics: DEFAULT_PERFORMANCE_CONFIG.metricsEnabled,
+    securityBatchSize: DEFAULT_PERFORMANCE_CONFIG.maxBatchSize,
+    securityBatchDelay: DEFAULT_PERFORMANCE_CONFIG.batchDelay
   })
   
   // Initialize token cache
@@ -214,7 +201,7 @@ export function SecurityProvider({
   
   // Clear sensitive data from forms and state with performance tracking
   const clearSensitiveData = () => {
-    metrics.startOperation('clearSensitiveData');
+    monitoring.security.trackOperation('clearSensitiveData', async () => {
     // Clear form fields with sensitive data
     const sensitiveInputs = document.querySelectorAll('input[type="password"], input[data-sensitive="true"]');
     Array.from(sensitiveInputs).forEach((input) => {
@@ -281,7 +268,7 @@ export function SecurityProvider({
   
   // Optimized inactivity monitoring with debounce
   const debouncedInactivityCheck = useDebounce((timestamp: number) => {
-    performance.startOperation('inactivityCheck');
+    monitoring.security.trackOperation('inactivityCheck', async () => {
     
     if (inactivityTimer.current) {
       window.clearTimeout(inactivityTimer.current);
