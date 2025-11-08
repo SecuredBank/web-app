@@ -6,7 +6,7 @@ import { XSSProtection } from '../utils/xssProtection'
 import { encryptData, decryptData } from '../utils/securityUtils'
 import { useA11y } from './A11yContext'
 import { useDebounce } from '../hooks/useDebounce'
-import { usePerformanceMonitoring } from '../hooks/usePerformanceMonitoring'
+import { useSecurityPerformance } from '../hooks/useSecurityPerformance'
 import { SecurityTokenCache } from '../utils/SecurityTokenCache'
 
 interface CachedOperation<T> {
@@ -137,8 +137,8 @@ export function SecurityProvider({
   children: React.ReactNode
   performanceConfig?: Partial<PerformanceConfig>
 }) {
-  // Initialize security features with performance monitoring
-  const performance = usePerformanceMonitoring('SecurityProvider', {
+  // Initialize performance monitoring
+  const metrics = usePerformanceMonitoring('SecurityProvider', {
     threshold: 100,
     enableMemoryMetrics: performanceConfig.metricsEnabled,
     onThresholdExceeded: (metrics) => {
@@ -208,13 +208,16 @@ export function SecurityProvider({
     }
   }
   
-  // Clear sensitive data from forms and state
+  // Clear sensitive data from forms and state with performance tracking
   const clearSensitiveData = () => {
+    metrics.startOperation('clearSensitiveData');
     // Clear form fields with sensitive data
-    const sensitiveInputs = document.querySelectorAll('input[type="password"], input[data-sensitive="true"]')
-    sensitiveInputs.forEach((input: HTMLInputElement) => {
-      input.value = ''
-    })
+    const sensitiveInputs = document.querySelectorAll('input[type="password"], input[data-sensitive="true"]');
+    Array.from(sensitiveInputs).forEach((input) => {
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+    });
     
     // Clear sensitive data from localStorage
     localStorage.removeItem('user_data')
@@ -336,17 +339,56 @@ export function SecurityProvider({
     performance.endOperation();
   }, [monitorInactivity]);
 
-  // Set up regular security maintenance
+  // Set up optimized security maintenance
   useEffect(() => {
-    const maintenanceInterval = setInterval(() => {
-      // Clean up expired sessions and tokens
-      sessionManager.cleanup()
-      csrf.clearExpiredTokens()
-      securityMiddleware.cleanup()
-    }, 5 * 60 * 1000) // Run every 5 minutes
+    metrics.startOperation('setupMaintenanceInterval');
+    
+    let isRunningMaintenance = false;
+    const performMaintenance = async () => {
+      if (isRunningMaintenance) return;
+      
+      try {
+        isRunningMaintenance = true;
+        metrics.startOperation('securityMaintenance');
+        
+        // Queue maintenance tasks
+        await Promise.all([
+          queueSecurityUpdate(async () => {
+            await sessionManager.cleanup?.();
+          }),
+          queueSecurityUpdate(async () => {
+            await csrf.clearExpiredTokens();
+          }),
+          queueSecurityUpdate(async () => {
+            await securityMiddleware.cleanup?.();
+          }),
+          queueSecurityUpdate(async () => {
+            tokenCache.cleanup();
+          })
+        ]);
+        
+        metrics.endOperation();
+      } finally {
+        isRunningMaintenance = false;
+      }
+    };
 
-    return () => clearInterval(maintenanceInterval)
-  }, [sessionManager, csrf, securityMiddleware])
+    const maintenanceInterval = setInterval(
+      performMaintenance,
+      performanceConfig.cleanupInterval || DEFAULT_PERFORMANCE_CONFIG.cleanupInterval
+    );
+
+    // Initial maintenance
+    performMaintenance();
+
+    return () => {
+      clearInterval(maintenanceInterval);
+      metrics.startOperation('cleanupMaintenance');
+      // Final cleanup
+      void performMaintenance();
+      metrics.endOperation();
+    };
+  }, [sessionManager, csrf, securityMiddleware, metrics]);
 
     // Set up device fingerprinting
   useEffect(() => {
