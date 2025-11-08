@@ -235,8 +235,28 @@ export function SecurityProvider({
     }
   }
   
+  // Optimized security refresh
+  const refreshSecurity = useCallback(async () => {
+    return monitoring.security.trackOperation('refreshSecurity', async () => {
+      const userId = localStorage.getItem('user_id');
+      if (!userId) return false;
+
+      try {
+        const [csrfToken, sessionToken] = await Promise.all([
+          getSecurityToken('csrf', userId),
+          getSecurityToken('session', userId)
+        ]);
+
+        return csrfToken !== null && sessionToken !== null;
+      } catch (error) {
+        console.error('Failed to refresh security tokens:', error);
+        return false;
+      }
+    });
+  }, [getSecurityToken, monitoring.security]);
+
   // Start secure session
-  const startSecureSession = () => {
+  const startSecureSession = useCallback(() => {
     setIsSecureInputFocused(true)
     announceSecurityEvent('Entering secure input mode')
     
@@ -244,14 +264,14 @@ export function SecurityProvider({
     if (defaultConfig.accessibility.autoRefreshTokens) {
       refreshSecurity()
     }
-  }
+  }, [defaultConfig.accessibility.autoRefreshTokens, announceSecurityEvent, refreshSecurity])
   
   // End secure session
-  const endSecureSession = () => {
+  const endSecureSession = useCallback(() => {
     setIsSecureInputFocused(false)
     announceSecurityEvent('Exiting secure input mode')
     clearSensitiveData()
-  }
+  }, [announceSecurityEvent])
   
   // Optimized inactivity monitoring with debounce
   const debouncedInactivityCheck = useDebounce((timestamp: number) => {
@@ -525,52 +545,54 @@ export function SecurityProvider({
     performance.endOperation();
   }, [queueSecurityUpdate, getSecurityToken]);
 
-  // Event listener management with cleanup and performance tracking
+  // Event listener management with monitoring
   useEffect(() => {
     if (!defaultConfig.accessibility.logoutOnInactivity) return;
-    
-    performance.startOperation('setupEventListeners');
-    
-    // Map of events to their throttled/debounced handlers
-    const eventHandlers = new Map([
-      ['keydown', monitorInactivity],
-      ['mousedown', monitorInactivity],
-      ['mousemove', useDebounce(monitorInactivity, 250)], // Debounce high-frequency events
-      ['wheel', useDebounce(monitorInactivity, 250)],
-      ['touchstart', monitorInactivity],
-      ['touchmove', useDebounce(monitorInactivity, 250)],
-      ['focus', monitorInactivity]
-    ]);
-    
-    // Batch add event listeners
-    queueSecurityUpdate(async () => {
-      for (const [event, handler] of eventHandlers.entries()) {
-        window.addEventListener(event, handler, { passive: true });
-      }
-    });
-    
-    monitorInactivity(); // Start initial timer
-    performance.endOperation();
-    
-    // Cleanup function
-    return () => {
-      performance.startOperation('cleanupEventListeners');
-      
-      // Batch remove event listeners
-      for (const [event, handler] of eventHandlers.entries()) {
-        window.removeEventListener(event, handler);
-      }
-      
-      if (inactivityTimer.current) {
-        window.clearTimeout(inactivityTimer.current);
-      }
-      
-      if (batchTimeout.current) {
-        window.clearTimeout(batchTimeout.current);
-      }
-      
-      performance.endOperation();
+
+    const setupListeners = async () => {
+      return monitoring.security.trackOperation('setupEventListeners', async () => {
+        // Map of events to their throttled/debounced handlers
+        const eventHandlers = new Map([
+          ['keydown', monitorInactivity],
+          ['mousedown', monitorInactivity],
+          ['mousemove', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
+          ['wheel', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
+          ['touchstart', monitorInactivity],
+          ['touchmove', useDebounce(monitorInactivity, performanceConfig.highFrequencyDebounce || 250)],
+          ['focus', monitorInactivity]
+        ]);
+        
+        // Batch add event listeners
+        await queueSecurityUpdate(async () => {
+          for (const [event, handler] of eventHandlers.entries()) {
+            window.addEventListener(event, handler, { passive: true });
+          }
+        });
+        
+        monitorInactivity(); // Start initial timer
+        
+        return () => {
+          // Batch remove event listeners
+          for (const [event, handler] of eventHandlers.entries()) {
+            window.removeEventListener(event, handler);
+          }
+          
+          if (inactivityTimer.current) {
+            window.clearTimeout(inactivityTimer.current);
+          }
+          
+          if (batchTimeout.current) {
+            window.clearTimeout(batchTimeout.current);
+          }
+        };
+      });
     };
+
+    const cleanupPromise = setupListeners();
+    return () => {
+      cleanupPromise.then(cleanup => cleanup && cleanup());
+    };
+  }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce]);
   }, [monitorInactivity]);
 
   const value: SecurityContextType = {
