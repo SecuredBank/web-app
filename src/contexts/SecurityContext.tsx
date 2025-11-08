@@ -237,9 +237,9 @@ export function SecurityProvider({
   
   // Optimized security refresh
   const refreshSecurity = useCallback(async () => {
-    return monitoring.security.trackOperation('refreshSecurity', async () => {
+    await monitoring.security.trackOperation('refreshSecurity', async () => {
       const userId = localStorage.getItem('user_id');
-      if (!userId) return false;
+      if (!userId) return;
 
       try {
         const [csrfToken, sessionToken] = await Promise.all([
@@ -247,10 +247,12 @@ export function SecurityProvider({
           getSecurityToken('session', userId)
         ]);
 
-        return csrfToken !== null && sessionToken !== null;
+        if (csrfToken && sessionToken) {
+          localStorage.setItem('csrf_token', csrfToken);
+          localStorage.setItem('session_id', sessionToken);
+        }
       } catch (error) {
         console.error('Failed to refresh security tokens:', error);
-        return false;
       }
     });
   }, [getSecurityToken, monitoring.security]);
@@ -513,37 +515,7 @@ export function SecurityProvider({
     });
   }, [monitoring.security, csrf, sessionManager, tokenCache]);
 
-  // Optimized security refresh
-  const refreshSecurity = useCallback(async () => {
-    performance.startOperation('refreshSecurity');
-    const userId = localStorage.getItem('user_id');
 
-    if (userId) {
-      queueSecurityUpdate(async () => {
-        // Generate new CSRF token
-        const newToken = getSecurityToken('csrf', userId);
-        if (newToken) {
-          localStorage.setItem('csrf_token', newToken);
-        }
-
-        // Create new session if needed
-        const fingerprint = localStorage.getItem('device_fingerprint');
-        if (fingerprint) {
-          const sessionId = localStorage.getItem('session_id');
-          const hasValidSession = sessionId && sessionManager.getSession(sessionId, fingerprint);
-
-          if (!hasValidSession) {
-            const newSessionToken = getSecurityToken('session', userId);
-            if (newSessionToken) {
-              localStorage.setItem('session_id', newSessionToken);
-            }
-          }
-        }
-      });
-    }
-
-    performance.endOperation();
-  }, [queueSecurityUpdate, getSecurityToken]);
 
   // Event listener management with monitoring
   useEffect(() => {
@@ -592,8 +564,7 @@ export function SecurityProvider({
     return () => {
       cleanupPromise.then(cleanup => cleanup && cleanup());
     };
-  }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce]);
-  }, [monitorInactivity]);
+  }, [defaultConfig.accessibility.logoutOnInactivity, monitorInactivity, performanceConfig.highFrequencyDebounce, queueSecurityUpdate]);
 
   const value: SecurityContextType = {
     securityMiddleware,
