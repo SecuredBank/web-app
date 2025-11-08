@@ -19,8 +19,13 @@ interface PerformanceConfig {
   metricsEnabled: boolean
 }
 
+// Token and cache TTL values
+const TOKEN_CACHE_TTL = 300000; // 5 minutes
+const SESSION_TTL = 3600000; // 1 hour
+const CSRF_TTL = 300000; // 5 minutes
+
 const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
-  tokenCacheTTL: 300000, // 5 minutes
+  tokenCacheTTL: TOKEN_CACHE_TTL,
   operationCacheTTL: 60000, // 1 minute
   batchDelay: 100, // 100ms
   highFrequencyDebounce: 250, // 250ms
@@ -66,22 +71,32 @@ interface SecurityConfig {
 }
 
 interface SecurityContextType {
-  securityMiddleware: SecurityMiddleware
-  sessionManager: SessionManager
-  csrf: CSRFProtection
-  xss: XSSProtection
-  refreshSecurity: () => Promise<void>
-  // Accessibility-related security features
-  announceSecurityEvent: (message: string, priority?: 'polite' | 'assertive') => void
-  clearSensitiveData: () => void
-  handleSecurityTimeout: () => void
-  resetSecurityFocus: () => void
-  isSecureInputFocused: boolean
-  startSecureSession: () => void
-  endSecureSession: () => void
-  monitorInactivity: () => void
-  pauseInactivityMonitoring: () => void
-  resumeInactivityMonitoring: () => void
+  // Core security services
+  securityMiddleware: SecurityMiddleware;
+  sessionManager: SessionManager;
+  csrf: CSRFProtection;
+  xss: XSSProtection;
+
+  // Token and session management
+  refreshSecurity: () => Promise<void>;
+  getSecurityToken: (type: string, userId: string) => Promise<string | null>;
+  queueSecurityUpdate: (update: () => Promise<void>) => void;
+
+  // Security state
+  isSecureInputFocused: boolean;
+
+  // Event handlers
+  monitorInactivity: () => void;
+  handleSecurityTimeout: () => void;
+  resetSecurityFocus: () => void;
+  startSecureSession: () => void;
+  endSecureSession: () => void;
+  pauseInactivityMonitoring: () => void;
+  resumeInactivityMonitoring: () => void;
+
+  // Utilities
+  announceSecurityEvent: (message: string, priority?: 'polite' | 'assertive') => void;
+  clearSensitiveData: () => void;
 }
 
 // Create and export security context
