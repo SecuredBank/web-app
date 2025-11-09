@@ -12,7 +12,13 @@ import {
 } from '../utils/securityUtils'
 import toast from 'react-hot-toast'
 import { useSecurity } from './SecurityContext'
-import { SecurityEvent, SecurityEventType } from '../types/security'
+import { 
+  SecurityEvent, 
+  SecurityEventType, 
+  SecuritySeverity,
+  SecurityMonitoring 
+} from '../types/security'
+import { monitoring } from '../services/monitoring'
 
 interface AuthState {
   user: User | null
@@ -30,13 +36,138 @@ interface AuthState {
 
 type AuthAction =
   | { type: 'AUTH_START' }
-  | { type: 'AUTH_SUCCESS'; payload: { user: User; token: string; expiresAt: Date } }
+  | { 
+      type: 'AUTH_SUCCESS'
+      payload: { 
+        user: User
+        token: string
+        expiresAt: Date
+        deviceFingerprint: string
+        securityScore: number
+      }
+    }
   | { type: 'AUTH_FAILURE'; payload: string }
+  | { type: 'LOGIN_ATTEMPT_FAILED'; payload: { timestamp: Date } }
   | { type: 'LOGOUT' }
   | { type: 'CLEAR_ERROR' }
   | { type: 'UPDATE_USER'; payload: User }
   | { type: 'SESSION_EXPIRED' }
-  | { type: 'REFRESH_TOKEN'; payload: { token: string; expiresAt: Date } }
+  | { type: 'SECURITY_ALERT'; payload: { type: string; severity: SecuritySeverity; message: string } }
+  | { type: 'DEVICE_UPDATE'; payload: string }
+  | { 
+      type: 'REFRESH_TOKEN'
+      payload: { 
+        token: string
+        expiresAt: Date
+        securityScore: number 
+      }
+    }
+
+// Security helper functions
+function calculateSecurityScore(user: User, deviceFingerprint: string): number {
+  let score = 100;
+  
+  // Reduce score for security risks
+  if (!user.mfaEnabled) score -= 20;
+  if (user.failedLoginAttempts > 0) score -= user.failedLoginAttempts * 5;
+  if (!deviceFingerprint) score -= 10;
+  
+  // Time-based factors
+  const daysSincePasswordChange = (Date.now() - user.lastPasswordChange.getTime()) / (1000 * 60 * 60 * 24);
+  if (daysSincePasswordChange > 90) score -= 15;
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+async function getUserLocation(): Promise<{ country: string; city: string; riskLevel: string } | null> {
+  try {
+    const response = await fetch('https://api.ipapi.com/api/check?access_key=' + process.env.IPAPI_KEY);
+    if (!response.ok) return null;
+    const data = await response.json();
+    
+    // Risk assessment based on location
+    const riskLevel = await assessLocationRisk(data.country_name);
+    
+    return {
+      country: data.country_name,
+      city: data.city,
+      riskLevel
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Assess location risk based on various factors
+async function assessLocationRisk(country: string): Promise<string> {
+  try {
+    // Check against high-risk countries list
+    const response = await fetch('/api/security/location-risk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ country })
+    });
+    
+    if (!response.ok) return 'medium';
+    
+    const { riskLevel } = await response.json();
+    return riskLevel;
+  } catch {
+    // Default to medium risk if assessment fails
+    return 'medium';
+  }
+}
+
+async function startSecurityMonitoring(userId: string, deviceFingerprint: string) {
+  const monitoringInterval = setInterval(async () => {
+    try {
+      // Check basic security status
+      const response = await fetch('/api/security/status', {
+        headers: {
+          'X-User-Id': userId,
+          'X-Device-Fingerprint': deviceFingerprint,
+          'X-Request-Time': Date.now().toString()
+        }
+      });
+      
+      if (!response.ok) throw new Error('Security status check failed');
+      
+      const data = await response.json();
+      
+      // Check for new device logins
+      const newDeviceLogins = await fetch('/api/security/device-logins', {
+        headers: { 'X-User-Id': userId }
+      }).then(res => res.json());
+      
+      // Combine all security threats
+      const allThreats = [
+        ...data.threats,
+        ...newDeviceLogins.suspiciousLogins.map((login: any) => ({
+          type: 'suspicious_device',
+          severity: 'high',
+          message: `Suspicious login detected from ${login.location}`
+        }))
+      ];
+
+      if (allThreats.length > 0) {
+        data.threats.forEach((threat: any) => {
+          dispatch({
+            type: 'SECURITY_ALERT',
+            payload: {
+              type: threat.type,
+              severity: threat.severity,
+              message: threat.message
+            }
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Security monitoring failed:', error);
+    }
+  }, 30000); // Check every 30 seconds
+
+  return () => clearInterval(monitoringInterval);
+}
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginForm) => Promise<void>
@@ -44,12 +175,72 @@ interface AuthContextType extends AuthState {
   clearError: () => void
   updateUser: (user: User) => void
   validateSession: () => Promise<boolean>
+  getSecurityStatus: () => { score: number; issues: string[] }
+  refreshDeviceFingerprint: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+// Security Configuration
 const SESSION_DURATION = 30 * 60 * 1000 // 30 minutes in milliseconds
 const TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000 // 25 minutes in milliseconds
+const MAX_FAILED_ATTEMPTS = 5
+const LOCKOUT_DURATION = 15 * 60 * 1000 // 15 minutes
+const SECURITY_CHECK_INTERVAL = 30 * 1000 // 30 seconds
+
+// Security Thresholds
+const SECURITY_THRESHOLDS = {
+  CRITICAL: 40,
+  HIGH: 60,
+  MEDIUM: 80,
+  LOW: 90
+} as const
+
+// Security helper functions
+function sanitizeInput(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;')
+}
+
+// Helper for handling security events
+const handleSecurityEvent = (
+  type: SecurityEventType,
+  severity: SecuritySeverity,
+  message: string,
+  data?: Record<string, any>
+) => {
+  monitoring.security.logSecurityEvent({
+    type,
+    severity,
+    timestamp: Date.now(),
+    data: {
+      message,
+      ...data
+    }
+  })
+  
+  dispatch({
+    type: 'SECURITY_ALERT',
+    payload: {
+      type,
+      severity,
+      message
+    }
+  })
+}
+
+// Helper types
+type SecurityStatus = {
+  score: number
+  issues: string[]
+  lastCheck: Date
+  recommendations: string[]
+}
 
 const initialState: AuthState = {
   user: null,
@@ -59,6 +250,10 @@ const initialState: AuthState = {
   error: null,
   sessionExpiresAt: null,
   lastLoginAt: null,
+  deviceFingerprint: null,
+  failedAttempts: 0,
+  lastAttemptAt: null,
+  securityScore: 100,
 }
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
@@ -79,12 +274,23 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         error: null,
         sessionExpiresAt: action.payload.expiresAt,
         lastLoginAt: new Date(),
+        deviceFingerprint: action.payload.deviceFingerprint,
+        securityScore: action.payload.securityScore,
+        failedAttempts: 0,
+        lastAttemptAt: null,
       }
     case 'AUTH_FAILURE':
       return {
         ...state,
         isLoading: false,
         error: action.payload,
+      }
+    case 'LOGIN_ATTEMPT_FAILED':
+      return {
+        ...state,
+        failedAttempts: state.failedAttempts + 1,
+        lastAttemptAt: action.payload.timestamp,
+        securityScore: Math.max(0, state.securityScore - 10),
       }
     case 'LOGOUT':
       return {
@@ -105,13 +311,56 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         ...initialState,
         error: 'Session expired. Please login again.',
       }
-    case 'REFRESH_TOKEN':
+    case 'SECURITY_ALERT': {
+      const severityScore = {
+        low: -5,
+        medium: -10,
+        high: -20,
+        critical: -30,
+      }[action.payload.severity] || 0;
+
+      // Log security event
+      monitoring.security.logSecurityEvent({
+        type: 'SECURITY_ALERT',
+        severity: action.payload.severity,
+        timestamp: Date.now(),
+        data: {
+          type: action.payload.type,
+          message: action.payload.message,
+          currentScore: state.securityScore
+        }
+      });
+
+      const newScore = Math.max(0, state.securityScore + severityScore);
+      
+      // Force logout if security score drops too low
+      if (newScore < SECURITY_THRESHOLDS.CRITICAL) {
+        setTimeout(() => dispatch({ type: 'LOGOUT' }), 0);
+      }
+
+      return {
+        ...state,
+        securityScore: newScore,
+      };
+    }
+    case 'REFRESH_TOKEN': {
       return {
         ...state,
         token: action.payload.token,
         sessionExpiresAt: action.payload.expiresAt,
-      }
+        securityScore: action.payload.securityScore,
+      };
+    }
+    case 'DEVICE_UPDATE': {
+      return {
+        ...state,
+        deviceFingerprint: action.payload,
+        // Recalculate security score with new device fingerprint
+        securityScore: state.user ? calculateSecurityScore(state.user, action.payload) : state.securityScore
+      };
+    }
     default:
+      return state;
       return state
   }
 }
@@ -164,14 +413,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const encryptedUser = localStorage.getItem('user')
         if (!encryptedUser) throw new Error('No user data found')
         
-        // Apply XSS protection when decrypting user data
-        const decryptedUser = services.xss.sanitize(decryptData(encryptedUser))
+        // Decrypt and sanitize user data with XSS protection
+        const decryptedUserRaw = decryptData(encryptedUser)
+        if (!decryptedUserRaw) throw new Error('Invalid user data')
         
-        const decryptedUser = decryptData(encryptedUser)
-        if (!decryptedUser) throw new Error('Invalid user data')
+        // Apply XSS sanitization to decrypted data
+        const decryptedUser = services.xss.sanitize(decryptedUserRaw)
 
         const user = JSON.parse(decryptedUser)
         const expiresAt = new Date(Date.now() + SESSION_DURATION)
+        
+        // Get device fingerprint for security
+        const deviceFingerprint = await getDeviceFingerprint()
+        
+        // Calculate initial security score
+        const securityScore = calculateSecurityScore(user, deviceFingerprint)
         
         dispatch({ 
           type: 'AUTH_SUCCESS',
@@ -179,6 +435,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             user,
             token: storedToken,
             expiresAt,
+            deviceFingerprint,
+            securityScore
           },
         })
       } catch (error) {
@@ -285,7 +543,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Apply XSS protection to credentials
       const sanitizedCredentials = {
-        email: services.xss.sanitize(credentials.email),
+        email: sanitizeInput(credentials.email),
         password: credentials.password, // Don't sanitize password
         rememberMe: credentials.rememberMe
       }
@@ -393,6 +651,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Security monitoring methods
+  const getSecurityStatus = (): { score: number; issues: string[] } => {
+    const issues: string[] = []
+    
+    if (state.securityScore < SECURITY_THRESHOLDS.MEDIUM) {
+      issues.push('Security score is below acceptable threshold')
+    }
+    
+    if (state.failedAttempts > 0) {
+      issues.push(`${state.failedAttempts} failed login attempts detected`)
+    }
+    
+    if (!state.deviceFingerprint) {
+      issues.push('Device fingerprint validation failed')
+    }
+    
+    return {
+      score: state.securityScore,
+      issues
+    }
+  }
+  
+  const refreshDeviceFingerprint = async () => {
+    const newFingerprint = await getDeviceFingerprint()
+    
+    // Validate the new fingerprint matches current session
+    const validFingerprint = await services.sessionManager.validateSession(
+      state.token || '',
+      newFingerprint
+    )
+    
+    if (!validFingerprint) {
+      handleSecurityEvent(
+        'device_changed',
+        'high',
+        'Device fingerprint validation failed'
+      )
+      await logout()
+      return
+    }
+    
+    // Update device fingerprint in state
+    dispatch({
+      type: 'DEVICE_UPDATE',
+      payload: newFingerprint
+    })
+  }
+
+  // Create context value with all methods
   const value: AuthContextType = {
     ...state,
     login,
@@ -400,6 +707,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearError,
     updateUser,
     validateSession,
+    getSecurityStatus,
+    refreshDeviceFingerprint
   }
 
   return (

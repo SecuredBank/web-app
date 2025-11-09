@@ -2,7 +2,7 @@ import { Bell, Search, Sun, Moon, Monitor } from 'lucide-react'
 import { useState } from 'react'
 import { useTheme } from '@contexts/ThemeContext'
 import { useAuth } from '@contexts/AuthContext'
-import { cn } from '@utils/cn'
+import { SecurityIndicator } from '../ui/SecurityIndicator'
 
 export default function Header() {
   const [searchQuery, setSearchQuery] = useState('')
@@ -35,6 +35,8 @@ export default function Header() {
 
           {/* Right side */}
           <div className="flex items-center space-x-4">
+            {/* Security Indicator */}
+            {user && <SecurityIndicator />}
             {/* Theme selector */}
             <div className="relative">
               <select
