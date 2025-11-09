@@ -1,3 +1,30 @@
+// Security Types
+export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export type SecurityEventType =
+  | 'AUTH_SUCCESS'
+  | 'AUTH_FAILURE'
+  | 'SECURITY_VIOLATION'
+  | 'SESSION_EXPIRED'
+  | 'SUSPICIOUS_ACTIVITY'
+  | 'BRUTE_FORCE_ATTEMPT'
+  | 'XSS_ATTEMPT'
+  | 'CSRF_VIOLATION'
+  | 'INVALID_TOKEN'
+  | 'DEVICE_CHANGE'
+  | 'TOKEN_REFRESH'
+  | 'USER_LOGOUT'
+  | 'SECURITY_ALERT'
+
+// Security Event Interface
+export interface SecurityEvent {
+  type: SecurityEventType
+  timestamp: number
+  severity: SecuritySeverity
+  data?: Record<string, any>
+}
+
+// Legacy Security Types
 export interface SecurityMetric {
   id: string
   name: string
@@ -12,7 +39,7 @@ export interface SecurityIncident {
   id: string
   title: string
   description: string
-  severity: 'critical' | 'high' | 'medium' | 'low'
+  severity: SecuritySeverity
   status: 'open' | 'investigating' | 'resolved' | 'closed'
   createdAt: Date
   updatedAt: Date
@@ -25,7 +52,7 @@ export interface SecurityIncident {
   tags: string[]
 }
 
-export type IncidentCategory = 
+export type IncidentCategory =
   | 'data_breach'
   | 'unauthorized_access'
   | 'malware'
