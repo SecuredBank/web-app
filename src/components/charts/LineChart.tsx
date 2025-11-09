@@ -1,5 +1,5 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { TimeSeriesData } from '@types'
+import { LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { TimeSeriesData } from '../../types/charts'
 
 interface LineChartProps {
   data: TimeSeriesData[]
@@ -7,14 +7,16 @@ interface LineChartProps {
   dataKey: string
   color?: string
   showLegend?: boolean
+  className?: string
 }
 
-export default function LineChart({ 
+export default function CustomLineChart({ 
   data, 
   title, 
   dataKey, 
   color = '#3b82f6',
-  showLegend = false 
+  showLegend = false,
+  className
 }: LineChartProps) {
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -37,7 +39,7 @@ export default function LineChart({
       <h3 className="text-lg font-semibold text-secondary-900 mb-4">{title}</h3>
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data}>
+          <RechartsLineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis 
               dataKey="timestamp" 
@@ -59,7 +61,7 @@ export default function LineChart({
               dot={{ fill: color, strokeWidth: 2, r: 4 }}
               activeDot={{ r: 6, stroke: color, strokeWidth: 2 }}
             />
-          </LineChart>
+          </RechartsLineChart>
         </ResponsiveContainer>
       </div>
     </div>

@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts'
-import { SecurityAlert, AlertSeverity, BaseProps } from '../types'
+import { SecurityAlert, AlertSeverity, BaseProps, ChartTooltipProps } from '../../types/charts'
 
 interface SecurityChartProps extends BaseProps {
   data: SecurityAlert[]
@@ -55,17 +55,7 @@ export default function SecurityChart({
       .filter(item => item.value > 0)
   }, [data])
 
-  interface TooltipProps {
-    active?: boolean
-    payload?: Array<{
-      value: number
-      name: string
-      color: string
-    }>
-    label?: string
-  }
-
-  const CustomTooltip: React.FC<TooltipProps> = ({ active, payload, label }) => {
+  const CustomTooltip: React.FC<ChartTooltipProps> = ({ active, payload, label }) => {
     if (!active || !payload || payload.length === 0) return null
 
     return (

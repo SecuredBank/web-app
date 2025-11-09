@@ -1,7 +1,9 @@
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { cn } from '@utils/cn'
 
-interface MetricCardProps {
+import { BaseProps } from '../../types/charts'
+
+interface MetricCardProps extends BaseProps {
   title: string
   value: string | number
   change?: number
@@ -18,6 +20,7 @@ export default function MetricCard({
   trend,
   icon,
   color = 'primary',
+  className,
   description,
 }: MetricCardProps) {
   const colorClasses = {
@@ -34,7 +37,7 @@ export default function MetricCard({
   }
 
   return (
-    <div className="card p-6 hover:shadow-elevated transition-shadow">
+    <div className={cn("card p-6 hover:shadow-elevated transition-shadow", className)}>
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-secondary-600 mb-1">{title}</p>

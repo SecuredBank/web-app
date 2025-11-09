@@ -1,11 +1,19 @@
 import React from 'react'
 import { Card } from '../ui/Card'
-import { LineChart } from '../charts/LineChart'
-import { MetricCard } from '../charts/MetricCard'
-import { SecurityChart } from '../charts/SecurityChart'
+import LineChart from '../charts/LineChart'
+import MetricCard from '../charts/MetricCard'
+import SecurityChart from '../charts/SecurityChart'
 import { useSecurityManagement } from '../../hooks/useSecurityManagement'
 import { Alert } from '../ui/Alert'
-import { LoadingSpinner } from '../ui/LoadingSpinner'
+import LoadingSpinner from '../ui/LoadingSpinner'
+import type { SecuritySeverity } from '../../types/security'
+
+interface MetricCardData {
+  title: string
+  value: number
+  description: string
+  trend: 'up' | 'down' | 'stable'
+}
 
 const SecurityDashboard: React.FC = () => {
   const {

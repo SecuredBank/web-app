@@ -1,12 +1,5 @@
-import { SecurityIncident, SecurityMetric, ComplianceReport } from '../types/security'
+import type { SecurityIncident, SecurityMetric, ComplianceReport } from '../types/security'
 import { AES, enc } from 'crypto-js'
-
-declare global {
-  interface ImportMetaEnv {
-    VITE_TOKEN_ENCRYPTION_KEY: string
-    VITE_APP_URL: string
-  }
-}
 
 // Security Constants
 const MAX_LOGIN_ATTEMPTS = 5
@@ -15,8 +8,8 @@ const SESSION_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 const SENSITIVE_DATA_FIELDS = ['password', 'token', 'secret', 'key', 'auth']
 
 // In development, use a default key. In production, require environment variable
-const ENCRYPTION_KEY = process.env.NODE_ENV === 'production' 
-  ? import.meta.env.VITE_TOKEN_ENCRYPTION_KEY 
+const TOKEN_ENCRYPTION_KEY = process.env.NODE_ENV === 'production'
+  ? (import.meta.env as any).VITE_TOKEN_ENCRYPTION_KEY
   : 'default-secure-key-change-in-production'
 
 // Data Security Functions
@@ -97,6 +90,47 @@ export const createSecureHeaders = (token?: string): Headers => {
   }
 
   return headers
+}
+
+// Risk Assessment Functions
+export function calculateRiskScore(incident: SecurityIncident): number {
+  const severityWeight = {
+    critical: 1.0,
+    high: 0.8,
+    medium: 0.6,
+    low: 0.4
+  }
+
+  const baseScore = severityWeight[incident.severity] * 100
+  const ageInHours = (Date.now() - incident.createdAt.getTime()) / (1000 * 60 * 60)
+  const timeWeight = Math.max(0.5, 1 - (ageInHours / 168)) // 168 hours = 1 week
+  
+  return Math.round(baseScore * timeWeight)
+}
+
+export function prioritizeIncidents(incidents: SecurityIncident[]): SecurityIncident[] {
+  const severityScore = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1
+  }
+
+  return incidents.sort((a, b) => {
+    // Sort by severity first
+    if (a.severity !== b.severity) {
+      return severityScore[b.severity] - severityScore[a.severity]
+    }
+    
+    // Then by status (open incidents first)
+    if (a.status !== b.status) {
+      const statusOrder = { open: 4, investigating: 3, resolved: 2, closed: 1 }
+      return (statusOrder[b.status] || 0) - (statusOrder[a.status] || 0)
+    }
+    
+    // Finally by date
+    return b.createdAt.getTime() - a.createdAt.getTime()
+  })
 }
 
 export const isValidOrigin = (origin: string): boolean => {
