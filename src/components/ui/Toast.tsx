@@ -89,3 +89,4 @@ const Toast = ({ id, type, title, message, duration = 5000, onClose }: ToastProp
 }
 
 export default Toast
+

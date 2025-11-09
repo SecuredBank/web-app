@@ -13,11 +13,11 @@ import {
 } from 'lucide-react'
 import { formatDateTime, formatRelativeTime } from '@utils/format'
 import { useDebounce } from '@hooks/useDebounce'
-import Card from '@components/ui/Card'
+import { Card } from '@components/ui/Card'
 import { CardContent, CardHeader, CardTitle } from '@components/ui/Card'
-import Button from '@components/ui/Button'
-import Input from '@components/ui/Input'
-import Badge from '@components/ui/Badge'
+import { Button } from '@components/ui/Button'
+import { Input } from '@components/ui/Input'
+import { Badge } from '@components/ui/Badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@components/ui/Table'
 
 interface Notification {
@@ -426,3 +426,4 @@ export default function NotificationsPage() {
     </div>
   )
 }
+

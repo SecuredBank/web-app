@@ -5,9 +5,9 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import Avatar from '@components/ui/Avatar'
-import Button from '@components/ui/Button'
-import Input from '@components/ui/Input'
-import Card from '@components/ui/Card'
+import { Button } from '@components/ui/Button'
+import { Input } from '@components/ui/Input'
+import { Card } from '@components/ui/Card'
 import { CardContent, CardHeader, CardTitle } from '@components/ui/Card'
 import { formatDate } from '@utils/format'
 
@@ -255,3 +255,4 @@ export default function ProfilePage() {
     </div>
   )
 }
+

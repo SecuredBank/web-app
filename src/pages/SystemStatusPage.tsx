@@ -12,11 +12,10 @@ import {
   Clock
 } from 'lucide-react'
 import { formatDateTime } from '@utils/format'
-import Card from '@components/ui/Card'
-import { CardContent, CardHeader, CardTitle } from '@components/ui/Card'
-import Button from '@components/ui/Button'
-import Badge from '@components/ui/Badge'
-import Progress from '@components/ui/Progress'
+import { Card, CardContent, CardHeader, CardTitle } from '@components/ui/Card'
+import { Button } from '@components/ui/Button'
+import { Badge } from '@components/ui/Badge'
+import { Progress } from '@components/ui/Progress'
 
 interface SystemComponent {
   id: string
@@ -288,3 +287,4 @@ export default function SystemStatusPage() {
     </div>
   )
 }
+

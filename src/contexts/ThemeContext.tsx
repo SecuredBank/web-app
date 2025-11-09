@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { Theme } from '@types'
+import { Theme } from '@/types'
 
 interface ThemeContextType {
   theme: Theme
@@ -63,3 +63,4 @@ export function useTheme() {
   }
   return context
 }
+

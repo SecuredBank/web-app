@@ -1,9 +1,9 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { User, UserRole } from '@types'
-import Input from '@components/ui/Input'
-import Button from '@components/ui/Button'
+import { User, UserRole } from '@/types'
+import { Input } from '@components/ui/Input'
+import { Button } from '@components/ui/Button'
 import { Mail, User as UserIcon } from 'lucide-react'
 
 const userSchema = z.object({
@@ -137,3 +137,4 @@ export default function UserForm({ user, onSubmit, onCancel, isLoading }: UserFo
     </form>
   )
 }
+

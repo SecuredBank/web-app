@@ -5,8 +5,8 @@ import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react'
 import { useAuth } from '@contexts/AuthContext'
 import { loginSchema } from '@utils/validation'
 import type { LoginForm as LoginFormType } from '@utils/validation'
-import Input from '@components/ui/Input'
-import Button from '@components/ui/Button'
+import { Input } from '@components/ui/Input'
+import { Button } from '@components/ui/Button'
 import Alert from '@components/ui/Alert'
 
 interface LoginFormProps {
@@ -191,3 +191,4 @@ export default function LoginForm({ onSuccess, onError }: LoginFormProps) {
     </form>
   )
 }
+

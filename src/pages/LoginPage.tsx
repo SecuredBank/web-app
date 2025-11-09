@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { Shield, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { useAuth } from '@contexts/AuthContext'
 import { useSecurity } from '@contexts/SecurityContext'
-import { LoginForm } from '@types'
+import { LoginForm } from '@/types'
 import { cn } from '@utils/cn'
 
 const loginSchema = z.object({
@@ -221,3 +221,4 @@ export default function LoginPage() {
     </div>
   )
 }
+

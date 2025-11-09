@@ -76,3 +76,4 @@ export class CSRFProtection {
     return parts.join('; ')
   }
 }
+

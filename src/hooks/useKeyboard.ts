@@ -73,3 +73,4 @@ export function useKeyboardShortcuts(shortcuts: Record<string, () => void>) {
     return () => document.removeEventListener('keydown', keyHandler)
   }, [shortcuts])
 }
+

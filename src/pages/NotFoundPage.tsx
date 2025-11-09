@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Home, ArrowLeft, Search } from 'lucide-react'
-import Button from '@components/ui/Button'
+import { Button } from '@components/ui/Button'
 
 export default function NotFoundPage() {
   return (
@@ -62,3 +62,4 @@ export default function NotFoundPage() {
     </div>
   )
 }
+

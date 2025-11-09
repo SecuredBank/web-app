@@ -14,7 +14,7 @@ import {
   UserCheck,
   UserX
 } from 'lucide-react'
-import { User, UserRole } from '@types'
+import { User, UserRole } from '@/types'
 import { cn } from '@utils/cn'
 
 // Mock user data
@@ -370,3 +370,4 @@ export default function UserManagementPage() {
     </div>
   )
 }
+

@@ -171,3 +171,4 @@ export const BREAKPOINTS = {
   XL: 1280,
   '2XL': 1536,
 } as const
+

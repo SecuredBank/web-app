@@ -84,3 +84,4 @@ export function usePerformanceMonitoring(
     getMetrics: () => ({ ...metrics.current }),
   }
 }
+

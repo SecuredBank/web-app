@@ -9,7 +9,7 @@ import {
   TrendingDown,
   Minus
 } from 'lucide-react'
-import { DashboardStats, SecurityMetric, SecurityAlert } from '@types'
+import { DashboardStats, SecurityMetric, SecurityAlert } from '@/types'
 import { cn } from '@utils/cn'
 
 // Mock data for development
@@ -318,3 +318,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+

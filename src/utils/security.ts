@@ -1,4 +1,8 @@
-import type { SecurityIncident, SecurityMetric, ComplianceReport } from '../types/security'
+import type {
+  SecurityIncident,
+  SecurityMetric,
+  ComplianceReport,
+} from '../types/security'
 import { AES, enc } from 'crypto-js'
 
 // Security Constants
@@ -8,9 +12,10 @@ const SESSION_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 const SENSITIVE_DATA_FIELDS = ['password', 'token', 'secret', 'key', 'auth']
 
 // In development, use a default key. In production, require environment variable
-const TOKEN_ENCRYPTION_KEY = process.env.NODE_ENV === 'production'
-  ? (import.meta.env as any).VITE_TOKEN_ENCRYPTION_KEY
-  : 'default-secure-key-change-in-production'
+const TOKEN_ENCRYPTION_KEY =
+  process.env.NODE_ENV === 'production'
+    ? (import.meta.env as any).VITE_TOKEN_ENCRYPTION_KEY
+    : 'default-secure-key-change-in-production'
 
 // Data Security Functions
 export const encryptData = (data: string): string => {
@@ -22,10 +27,14 @@ export const decryptData = (encryptedData: string): string => {
   return bytes.toString(enc.Utf8)
 }
 
-export const sanitizeData = <T extends Record<string, any>>(data: T): Partial<T> => {
+export const sanitizeData = <T extends Record<string, any>>(
+  data: T
+): Partial<T> => {
   const sanitized = { ...data }
   Object.keys(sanitized).forEach(key => {
-    if (SENSITIVE_DATA_FIELDS.some(field => key.toLowerCase().includes(field))) {
+    if (
+      SENSITIVE_DATA_FIELDS.some(field => key.toLowerCase().includes(field))
+    ) {
       delete sanitized[key]
     }
   })
@@ -64,7 +73,7 @@ export const handleLoginAttempt = (
     if (newCount >= MAX_LOGIN_ATTEMPTS) {
       loginAttempts.set(userId, {
         count: newCount,
-        timeout: now + LOGIN_ATTEMPT_TIMEOUT
+        timeout: now + LOGIN_ATTEMPT_TIMEOUT,
       })
       return { allowed: false, remainingAttempts: 0 }
     }
@@ -74,7 +83,7 @@ export const handleLoginAttempt = (
   }
 }
 
-// Security Headers and CORS
+// Security Headers
 export const createSecureHeaders = (token?: string): Headers => {
   const headers = new Headers({
     'Content-Type': 'application/json',
@@ -82,7 +91,7 @@ export const createSecureHeaders = (token?: string): Headers => {
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()'
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
   })
 
   if (token) {
@@ -98,163 +107,82 @@ export function calculateRiskScore(incident: SecurityIncident): number {
     critical: 1.0,
     high: 0.8,
     medium: 0.6,
-    low: 0.4
-  }
+    low: 0.4,
+  } as const
 
   const baseScore = severityWeight[incident.severity] * 100
-  const ageInHours = (Date.now() - incident.createdAt.getTime()) / (1000 * 60 * 60)
-  const timeWeight = Math.max(0.5, 1 - (ageInHours / 168)) // 168 hours = 1 week
-  
+  const ageInHours =
+    (Date.now() - incident.createdAt.getTime()) / (1000 * 60 * 60)
+  const timeWeight = Math.max(0.5, 1 - ageInHours / 168) // 168 hours = 1 week
+
   return Math.round(baseScore * timeWeight)
 }
 
-export function prioritizeIncidents(incidents: SecurityIncident[]): SecurityIncident[] {
+export function prioritizeIncidents(
+  incidents: SecurityIncident[]
+): SecurityIncident[] {
   const severityScore = {
     critical: 4,
     high: 3,
     medium: 2,
-    low: 1
-  }
+    low: 1,
+  } as const
 
   return incidents.sort((a, b) => {
     // Sort by severity first
     if (a.severity !== b.severity) {
       return severityScore[b.severity] - severityScore[a.severity]
     }
-    
+
     // Then by status (open incidents first)
     if (a.status !== b.status) {
-      const statusOrder = { open: 4, investigating: 3, resolved: 2, closed: 1 }
+      const statusOrder = {
+        open: 4,
+        investigating: 3,
+        resolved: 2,
+        closed: 1,
+      } as const
       return (statusOrder[b.status] || 0) - (statusOrder[a.status] || 0)
     }
-    
+
     // Finally by date
     return b.createdAt.getTime() - a.createdAt.getTime()
   })
 }
 
-export const isValidOrigin = (origin: string): boolean => {
-  const allowedOrigins = [
-    import.meta.env.VITE_APP_URL,
-    'https://api.securedbank.com',
-    'https://admin.securedbank.com'
-  ].filter(Boolean)
-
-  return allowedOrigins.includes(origin)
-}
-
-// Security Incident Management Functions
-  const severityWeights = {
-    critical: 1.0,
-    high: 0.8,
-    medium: 0.5,
-    low: 0.2
-  }
-
-  const statusMultipliers = {
-    open: 1.0,
-    investigating: 0.8,
-    resolved: 0.2,
-    closed: 0.1
-  }
-
-  const baseScore = severityWeights[incident.severity] * 100
-  const timeWeight = calculateTimeWeight(incident.createdAt)
-  const statusMultiplier = statusMultipliers[incident.status]
-  const impactMultiplier = calculateImpactMultiplier(incident)
-
-  return baseScore * timeWeight * statusMultiplier * impactMultiplier
-}
-
-const calculateTimeWeight = (createdAt: Date): number => {
-  const now = new Date()
-  const ageInDays = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
-  return Math.max(0.1, Math.min(1, 1 - (ageInDays / 30)))
-}
-
-const calculateImpactMultiplier = (incident: SecurityIncident): number => {
-  const systemsImpact = Math.min(1, incident.impactedSystems.length / 10)
-  const userImpact = Math.min(1, incident.affectedUsers / 1000)
-  return (systemsImpact + userImpact) / 2
-}
-
-export const aggregateSecurityMetrics = (metrics: SecurityMetric[]): Record<string, number> => {
-  return metrics.reduce((acc, metric) => {
-    acc[metric.name] = metric.value
-    return acc
-  }, {} as Record<string, number>)
-}
-
-export const calculateComplianceScore = (reports: ComplianceReport[]): number => {
-  if (reports.length === 0) return 0
+export const calculateComplianceScore = (
+  reports: ComplianceReport[]
+): number => {
+  if (!reports || !reports.length) return 0
 
   const weights = {
-    pci: 0.4,
+    pci: 0.3,
     gdpr: 0.3,
     sox: 0.2,
-    hipaa: 0.1
-  }
+    hipaa: 0.2,
+  } as const
 
-  const weightedScores = reports.map(report => {
-    const weight = weights[report.type] || 0.1
-    return report.score * weight
+  let totalScore = 0
+  let totalWeight = 0
+
+  reports.forEach(report => {
+    const weight = weights[report.type] || 0
+    totalScore += report.score * weight
+    totalWeight += weight
   })
 
-  return weightedScores.reduce((sum, score) => sum + score, 0)
+  return totalWeight ? Math.round((totalScore / totalWeight) * 100) / 100 : 0
 }
 
-export const categorizeIncidents = (incidents: SecurityIncident[]): Record<string, SecurityIncident[]> => {
-  return incidents.reduce((acc, incident) => {
-    if (!acc[incident.category]) {
-      acc[incident.category] = []
-    }
-    acc[incident.category].push(incident)
-    return acc
-  }, {} as Record<string, SecurityIncident[]>)
+export const aggregateSecurityMetrics = (
+  metrics: SecurityMetric[]
+): Record<string, number> => {
+  return metrics.reduce(
+    (acc, metric) => {
+      acc[metric.name] = metric.value
+      return acc
+    },
+    {} as Record<string, number>
+  )
 }
 
-export const prioritizeIncidents = (incidents: SecurityIncident[]): SecurityIncident[] => {
-  return [...incidents].sort((a, b) => {
-    const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 }
-    const statusOrder = { open: 4, investigating: 3, resolved: 2, closed: 1 }
-    
-    // Compare severity first
-    if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-      return severityOrder[b.severity] - severityOrder[a.severity]
-    }
-    
-    // Then compare status
-    if (statusOrder[a.status] !== statusOrder[b.status]) {
-      return statusOrder[b.status] - statusOrder[a.status]
-    }
-    
-    // Finally compare by date
-    return b.createdAt.getTime() - a.createdAt.getTime()
-  })
-}
-
-export const validateIncidentData = (incident: Partial<SecurityIncident>): string[] => {
-  const errors: string[] = []
-
-  if (!incident.title?.trim()) {
-    errors.push('Title is required')
-  }
-
-  if (!incident.description?.trim()) {
-    errors.push('Description is required')
-  }
-
-  if (!incident.severity || !['critical', 'high', 'medium', 'low'].includes(incident.severity)) {
-    errors.push('Valid severity level is required')
-  }
-
-  if (!incident.category) {
-    errors.push('Incident category is required')
-  }
-
-  if (!Array.isArray(incident.impactedSystems) || incident.impactedSystems.length === 0) {
-    errors.push('At least one impacted system must be specified')
-  }
-
-  return errors
-}

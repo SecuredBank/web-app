@@ -12,7 +12,7 @@ import {
   Shield,
   Eye
 } from 'lucide-react'
-import { Report, ReportType, ReportData } from '@types'
+import { Report, ReportType, ReportData } from '@/types'
 import { cn } from '@utils/cn'
 
 // Mock report data
@@ -344,3 +344,4 @@ export default function ReportsPage() {
     </div>
   )
 }
+

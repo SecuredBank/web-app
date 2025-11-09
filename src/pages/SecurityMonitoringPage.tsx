@@ -10,7 +10,7 @@ import {
   MapPin,
   Activity
 } from 'lucide-react'
-import { SecurityAlert, AlertSeverity, AlertType, AlertStatus } from '@types'
+import { SecurityAlert, SecuritySeverity, SecurityEventType, SecurityStatus } from '@/types/security'
 import { cn } from '@utils/cn'
 import { useSecurity } from '@contexts/SecurityContext'
 import { Card } from '@components/ui/Card'
@@ -446,8 +446,8 @@ function AlertFilters({
 }
 
 export default function SecurityMonitoringPage() {
-  const [alerts, setAlerts] = useState<SecurityAlert[]>(mockAlerts)
-  const [filteredAlerts, setFilteredAlerts] = useState<SecurityAlert[]>(mockAlerts)
+  const [alerts, setAlerts] = useState<SecurityAlert[]>([])
+  const [filteredAlerts, setFilteredAlerts] = useState<SecurityAlert[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [filters, setFilters] = useState({
     severity: 'all' as AlertSeverity | 'all',
@@ -593,3 +593,4 @@ export default function SecurityMonitoringPage() {
     </div>
   )
 }
+

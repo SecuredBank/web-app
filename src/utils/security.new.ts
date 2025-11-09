@@ -185,3 +185,4 @@ export const aggregateSecurityMetrics = (
     {} as Record<string, number>
   )
 }
+

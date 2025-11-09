@@ -152,3 +152,4 @@ const Slider = forwardRef<HTMLDivElement, SliderProps>(
 Slider.displayName = 'Slider'
 
 export default Slider
+

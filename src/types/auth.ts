@@ -62,3 +62,4 @@ export interface TwoFactorVerificationRequest {
   tempToken: string
   code: string
 }
+

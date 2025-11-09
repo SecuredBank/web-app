@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Search, Filter, X } from 'lucide-react'
 import { useDebounce } from '@hooks/useDebounce'
-import Input from '@components/ui/Input'
-import Button from '@components/ui/Button'
+import { Input } from '@components/ui/Input'
+import { Button } from '@components/ui/Button'
 
 interface SearchFormProps {
   onSearch: (query: string) => void
@@ -137,3 +137,4 @@ export default function SearchForm({
     </div>
   )
 }
+

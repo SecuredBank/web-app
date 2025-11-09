@@ -31,3 +31,4 @@ export const usePrefersDarkMode = () => useMediaQuery('(prefers-color-scheme: da
 
 // Reduced motion detection
 export const usePrefersReducedMotion = () => useMediaQuery('(prefers-reduced-motion: reduce)')
+

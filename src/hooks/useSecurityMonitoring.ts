@@ -124,3 +124,4 @@ export function useSecurityMonitoring() {
     logSecurityEvent,
   }
 }
+

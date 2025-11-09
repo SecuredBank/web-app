@@ -42,3 +42,4 @@ export const usePerformanceMetrics = () => {
     hasError: Object.values(metrics).some(m => m === undefined),
   }
 }
+

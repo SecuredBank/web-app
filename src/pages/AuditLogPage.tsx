@@ -14,10 +14,10 @@ import {
 import { useDebounce } from '@hooks/useDebounce'
 import { formatDateTime } from '@utils/format'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@components/ui/Table'
-import Button from '@components/ui/Button'
-import Input from '@components/ui/Input'
-import Badge from '@components/ui/Badge'
-import Card from '@components/ui/Card'
+import { Button } from '@components/ui/Button'
+import { Input } from '@components/ui/Input'
+import { Badge } from '@components/ui/Badge'
+import { Card } from '@components/ui/Card'
 import { CardContent, CardHeader, CardTitle } from '@components/ui/Card'
 
 interface AuditLogEntry {
@@ -336,3 +336,4 @@ export default function AuditLogPage() {
     </div>
   )
 }
+

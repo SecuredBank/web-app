@@ -67,3 +67,4 @@ class SecurityMonitoringService implements SecurityMonitoring {
 export const monitoring = {
   security: new SecurityMonitoringService(),
 }
+

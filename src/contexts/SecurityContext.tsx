@@ -11,8 +11,8 @@ import { useMonitoring } from '../hooks/useMonitoring';
 import { 
   SecurityEvent,
   SecurityEventType,
-  SecurityMetrics,
-  SecurityMonitoringConfig,
+  SecurityMetric,
+  SecurityConfig,
   SecurityHealth 
 } from '../types/security';
 
@@ -101,7 +101,7 @@ interface SecurityContextType {
   // Security monitoring
   monitoring: {
     logSecurityEvent: (event: SecurityEvent) => void;
-    getMetrics: () => SecurityMetrics;
+    getMetrics: () => SecurityMetric[];
     clearMetrics: () => void;
   };
 }
@@ -463,5 +463,5 @@ export const useSecurity = (): SecurityContextType => {
 };
 
 // Export the context and types
-export type { SecurityConfig, PerformanceConfig, SecurityEvent, SecurityEventType, SecurityMetrics };
+export type { SecurityConfig, PerformanceConfig, SecurityEvent, SecurityEventType, SecurityMetric };
 export { SecurityContext };

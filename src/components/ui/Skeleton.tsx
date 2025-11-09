@@ -105,3 +105,4 @@ export const SkeletonTable = ({ rows = 5, className }: { rows?: number; classNam
 )
 
 export default Skeleton
+

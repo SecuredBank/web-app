@@ -61,3 +61,4 @@ describe('useMonitoring', () => {
     expect(result.current.security).toHaveProperty('pendingOperationsCount')
   })
 })
+

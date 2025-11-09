@@ -47,3 +47,4 @@ export const useMemoryMetrics = (interval = 5000) => {
     isSupported: 'performance' in window && 'memory' in (performance as any),
   }
 }
+
