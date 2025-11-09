@@ -19,12 +19,12 @@ export interface User {
   sessionTimeout: number
 }
 
-export type UserRole = 
-  | 'admin' 
-  | 'security_officer' 
-  | 'analyst' 
-  | 'viewer' 
-  | 'auditor' 
+export type UserRole =
+  | 'admin'
+  | 'security_officer'
+  | 'analyst'
+  | 'viewer'
+  | 'auditor'
   | 'risk_manager'
 
 export interface Permission {
@@ -38,78 +38,17 @@ export interface Permission {
   expiresAt?: Date
 }
 
-export type PermissionAction = 
-  | 'create' 
-  | 'read' 
-  | 'update' 
-  | 'delete' 
-  | 'manage' 
-  | 'approve' 
+export type PermissionAction =
+  | 'create'
+  | 'read'
+  | 'update'
+  | 'delete'
+  | 'manage'
+  | 'approve'
   | 'reject'
 
 // Security Types
-export interface SecurityAlert {
-  id: string
-  type: AlertType
-  severity: AlertSeverity
-  title: string
-  description: string
-  timestamp: Date
-  source: string
-  status: AlertStatus
-  assignedTo?: string
-  resolvedAt?: Date
-  metadata?: Record<string, any>
-  ipAddress?: string
-  location?: GeoLocation
-  deviceInfo?: DeviceInfo
-  relatedAlerts?: string[]
-  priority: number
-  escalationLevel: number
-  responseActions: ResponseAction[]
-  auditTrail: AuditEvent[]
-}
-
-export interface GeoLocation {
-  latitude: number
-  longitude: number
-  country: string
-  city: string
-  region: string
-}
-
-export interface DeviceInfo {
-  id: string
-  type: string
-  os: string
-  browser: string
-  ip: string
-  userAgent: string
-  lastSeen: Date
-  trusted: boolean
-}
-
-export interface ResponseAction {
-  id: string
-  type: string
-  description: string
-  status: 'pending' | 'in_progress' | 'completed' | 'failed'
-  timestamp: Date
-  performedBy?: string
-  result?: string
-}
-
-export interface AuditEvent {
-  id: string
-  timestamp: Date
-  action: string
-  performedBy: string
-  details: Record<string, any>
-  ipAddress: string
-  success: boolean
-}
-
-export type AlertType = 
+export type AlertType =
   | 'login_anomaly'
   | 'suspicious_transaction'
   | 'data_breach'
@@ -128,15 +67,87 @@ export type AlertType =
 
 export type AlertSeverity = 'low' | 'medium' | 'high' | 'critical'
 
-export type AlertStatus = 
-  | 'open' 
-  | 'investigating' 
-  | 'resolved' 
-  | 'false_positive' 
+export type AlertStatus =
+  | 'open'
+  | 'investigating'
+  | 'resolved'
+  | 'false_positive'
   | 'escalated'
   | 'pending_review'
   | 'mitigated'
   | 'remediated'
+
+export interface GeoLocation {
+  latitude: number
+  longitude: number
+  country?: string
+  city?: string
+  region?: string
+}
+
+export interface DeviceInfo {
+  id: string
+  type: string
+  os: string
+  browser: string
+  ip: string
+  userAgent: string
+  lastSeen: Date
+  trusted: boolean
+}
+
+export interface AuditEvent {
+  id: string
+  timestamp: Date
+  action: string
+  performedBy: string
+  details: Record<string, any>
+  ipAddress: string
+  success: boolean
+}
+
+export interface ResponseAction {
+  id: string
+  type: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  timestamp: Date
+  performedBy?: string
+  result?: Record<string, any>
+}
+
+export interface SecurityAlert {
+  id: string
+  type: AlertType
+  severity: AlertSeverity
+  title: string
+  description: string
+  timestamp: Date
+  source: string
+  status: AlertStatus
+  assignedTo?: string
+  resolvedAt?: Date
+  metadata?: Record<string, any>
+  ipAddress?: string
+  location?: GeoLocation
+  deviceInfo?: DeviceInfo
+  relatedAlerts?: string[]
+  priority?: number
+  escalationLevel?: number
+  responseActions?: ResponseAction[]
+  auditTrail?: AuditEvent[]
+}
+
+export interface SecurityMetrics {
+  events: Array<{
+    type: string
+    timestamp: number
+    data?: any
+  }>
+  failedAuths: number
+  violations: number
+  averageResponseTime: number
+}
 
 // Component Types
 export interface BaseProps {
@@ -290,7 +301,12 @@ export interface Transaction {
   flagged: boolean
 }
 
-export type TransactionType = 'transfer' | 'deposit' | 'withdrawal' | 'payment' | 'refund'
+export type TransactionType =
+  | 'transfer'
+  | 'deposit'
+  | 'withdrawal'
+  | 'payment'
+  | 'refund'
 export type TransactionStatus = 'pending' | 'completed' | 'failed' | 'cancelled'
 
 // Report Types
@@ -304,7 +320,7 @@ export interface Report {
   format: 'pdf' | 'csv' | 'json'
 }
 
-export type ReportType = 
+export type ReportType =
   | 'security_summary'
   | 'user_activity'
   | 'transaction_analysis'

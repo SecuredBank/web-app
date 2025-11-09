@@ -265,15 +265,6 @@ export default function SecurityMonitoringPage() {
     </div>
   )
 }
-export default function SecurityMonitoringPage() {
-  const { monitoring } = useSecurity()
-  const [alerts, setAlerts] = useState<SecurityAlert[]>([])
-  const [metrics, setMetrics] = useState<SecurityMetric[]>([])
-  const [filter, setFilter] = useState({
-    severity: 'all',
-    type: 'all',
-    status: 'all'
-  })
   
   // Update metrics and alerts when monitoring data changes
   useEffect(() => {
