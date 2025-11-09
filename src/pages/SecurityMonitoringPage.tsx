@@ -315,8 +315,12 @@ export default function SecurityMonitoringPage() {
       }
     ])
   }, [monitoring])
+
+const severityColors = {
+  low: 'bg-success-100 text-success-800 border-success-200',
+  medium: 'bg-warning-100 text-warning-800 border-warning-200',
   high: 'bg-danger-100 text-danger-800 border-danger-200',
-  critical: 'bg-danger-200 text-danger-900 border-danger-300',
+  critical: 'bg-danger-200 text-danger-900 border-danger-300'
 }
 
 const statusColors = {
